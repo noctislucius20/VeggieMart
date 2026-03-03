@@ -1,0 +1,89 @@
+package handler
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"net/http"
+	"path"
+	"time"
+	"user-service/config"
+	"user-service/internal/adapter"
+	"user-service/internal/adapter/handler/response"
+	"user-service/internal/adapter/storage"
+	"user-service/internal/core/service"
+	"user-service/utils/logger"
+
+	"github.com/go-redis/redis/v8"
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/gommon/log"
+)
+
+type UploadImageInterface interface {
+	UploadImage(c echo.Context) error
+}
+
+type uploadImageStruct struct {
+	storageHandler storage.SupabaseInterface
+}
+
+// UploadImage implements UploadImageInterface.
+func (u *uploadImageStruct) UploadImage(c echo.Context) error {
+	var resp = response.DefaultResponse{}
+
+	file, err := c.FormFile("photo")
+	if err != nil {
+		log.Errorf("[UploadImage-1] UploadImage: %v", err)
+		resp.Message = err.Error()
+		resp.Data = nil
+		return c.JSON(http.StatusUnprocessableEntity, resp)
+	}
+
+	src, err := file.Open()
+	if err != nil {
+		log.Errorf("[UploadImage-2] UploadImage: %v", err)
+		resp.Message = err.Error()
+		resp.Data = nil
+		return c.JSON(http.StatusBadRequest, resp)
+	}
+
+	defer src.Close()
+
+	fileBuffer := new(bytes.Buffer)
+	_, err = io.Copy(fileBuffer, src)
+	if err != nil {
+		log.Errorf("[UploadImage-3] UploadImage: %v", err)
+		resp.Message = err.Error()
+		resp.Data = nil
+		return c.JSON(http.StatusInternalServerError, resp)
+	}
+
+	newFileName := fmt.Sprintf("%s_%d%s", uuid.New().String(), time.Now().Unix(), path.Ext(file.Filename))
+
+	uploadPath := fmt.Sprintf("public/uploads/%s", newFileName)
+	url, err := u.storageHandler.UploadFile(uploadPath, fileBuffer)
+	if err != nil {
+		log.Errorf("[UploadImage-4] UploadImage: %v", err)
+		resp.Message = err.Error()
+		resp.Data = nil
+		return c.JSON(http.StatusInternalServerError, resp)
+	}
+
+	resp.Message = "success"
+	resp.Data = map[string]string{"image_url": url}
+
+	return c.JSON(http.StatusOK, resp)
+
+}
+
+func NewUploadImageStorageHandler(e *echo.Echo, cfg *config.Config, jwtService service.JwtServiceInterface, storageHandler storage.SupabaseInterface, redisClient *redis.Client) UploadImageInterface {
+	res := &uploadImageStruct{
+		storageHandler: storageHandler,
+	}
+
+	mid := adapter.NewMiddlewareAdapter(cfg, logger.NewLogger().Logger(), jwtService, redisClient)
+	e.POST("/auth/profie/image-upload", res.UploadImage, mid.CheckToken())
+
+	return res
+}
