@@ -718,6 +718,8 @@ func (u *userHandler) SignIn(c echo.Context) error {
 		switch err.Error() {
 		case utils.DATA_NOT_FOUND:
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
+		case utils.EMAIL_NOT_VERIFIED:
+			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
 		default:
 			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 		}
