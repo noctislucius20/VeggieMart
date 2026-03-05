@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"user-service/internal/core/domain/entity"
 	"user-service/internal/core/domain/model"
 	"user-service/utils"
@@ -516,28 +517,6 @@ func (u *userRepository) CreateUserAccount(ctx context.Context, req entity.UserE
 		modelRole model.Role
 	)
 
-	if err := db.WithContext(ctx).
-		Select("is_verified").
-		Where("email = ?", req.Email).
-		Find(&modelUser).
-		Limit(1).Error; err != nil {
-		u.logger.Errorf("[UserRepository-1] CreateUserAccount: %v", err)
-		return 0, err
-	}
-
-	if modelUser.Email != "" {
-		switch modelUser.IsVerified {
-		case true:
-			err := errors.New(utils.EMAIL_ALREADY_EXISTS)
-			u.logger.Errorf("[UserRepository-2] CreateUserAccount: %v", err)
-			return 0, err
-		case false:
-			err := errors.New(utils.EMAIL_NOT_VERIFIED)
-			u.logger.Errorf("[UserRepository-3] CreateUserAccount: %v", err)
-			return 0, err
-		}
-	}
-
 	modelRole.ID = req.RoleId
 
 	modelUser = model.User{
@@ -547,7 +526,33 @@ func (u *userRepository) CreateUserAccount(ctx context.Context, req entity.UserE
 		Roles:    []model.Role{modelRole},
 	}
 
-	if err := db.WithContext(ctx).Create(&modelUser).Error; err != nil {
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := db.WithContext(ctx).Create(&modelUser).Error; err != nil {
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		if strings.Contains(err.Error(), "duplicate key") {
+			if err := db.WithContext(ctx).
+				Select("is_verified").
+				Where("email = ?", req.Email).
+				First(&modelUser).Error; err != nil {
+				u.logger.Errorf("[UserRepository-1] CreateUserAccount: %v", err)
+				return 0, err
+			}
+
+			if modelUser.IsVerified {
+				err := errors.New(utils.EMAIL_ALREADY_EXISTS)
+				u.logger.Errorf("[UserRepository-2] CreateUserAccount: %v", err)
+				return 0, err
+			}
+
+			err := errors.New(utils.EMAIL_NOT_VERIFIED)
+			u.logger.Errorf("[UserRepository-3] CreateUserAccount: %v", err)
+			return 0, err
+		}
+
 		u.logger.Errorf("[UserRepository-4] CreateUserAccount: %v", err)
 		return 0, err
 	}
