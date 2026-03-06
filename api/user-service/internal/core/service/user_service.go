@@ -2,18 +2,17 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 	"user-service/config"
 	"user-service/internal/adapter/repository"
+	"user-service/internal/adapter/repository/cache"
 	"user-service/internal/core/domain/entity"
 	"user-service/internal/core/service/transaction"
 	"user-service/utils"
 	"user-service/utils/conv"
 
-	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"github.com/labstack/gommon/log"
 )
@@ -42,21 +41,21 @@ type userService struct {
 	cfg         *config.Config
 	jwtService  JwtServiceInterface
 	repoToken   repository.VerificationTokenRepositoryInterface
+	cacheUser   cache.UserCacheInterface
 	roleService RoleServiceInterface
-	redisClient *redis.Client
 	txManager   transaction.TransactionManager
 	logger      *log.Logger
 }
 
-func NewUserService(repo repository.UserRepositoryInterface, cfg *config.Config, jwtService JwtServiceInterface, repoToken repository.VerificationTokenRepositoryInterface, repoOutbox repository.OutboxEventInterface, roleService RoleServiceInterface, redisClient *redis.Client, txManager transaction.TransactionManager, logger *log.Logger) UserServiceInterface {
+func NewUserService(repo repository.UserRepositoryInterface, cfg *config.Config, jwtService JwtServiceInterface, repoToken repository.VerificationTokenRepositoryInterface, repoOutbox repository.OutboxEventInterface, roleService RoleServiceInterface, cacheUser cache.UserCacheInterface, txManager transaction.TransactionManager, logger *log.Logger) UserServiceInterface {
 	return &userService{
 		repo:        repo,
 		cfg:         cfg,
 		jwtService:  jwtService,
 		repoOutbox:  repoOutbox,
 		repoToken:   repoToken,
+		cacheUser:   cacheUser,
 		roleService: roleService,
-		redisClient: redisClient,
 		txManager:   txManager,
 		logger:      logger,
 	}
@@ -97,10 +96,10 @@ func (u *userService) DeleteCustomer(ctx context.Context, customerId int64) erro
 	}
 
 	// redis delete key
-	key := fmt.Sprintf("customer:%d", customerId)
-	if err := u.redisClient.Del(ctx, key).Err(); err != nil {
-		u.logger.Errorf("[UserService-2] DeleteCustomer: %v", err)
-	}
+	// key := fmt.Sprintf("customer:%d", customerId)
+	// if err := u.redisClient.Del(ctx, key).Err(); err != nil {
+	// 	u.logger.Errorf("[UserService-2] DeleteCustomer: %v", err)
+	// }
 
 	return nil
 }
@@ -151,10 +150,10 @@ func (u *userService) UpdateCustomer(ctx context.Context, req entity.UserEntity)
 	}
 
 	// redis delete key
-	key := fmt.Sprintf("customer:%d", req.ID)
-	if err := u.redisClient.Del(ctx, key).Err(); err != nil {
-		u.logger.Errorf("[UserService-2] UpdateCustomer: %v", err)
-	}
+	// key := fmt.Sprintf("customer:%d", req.ID)
+	// if err := u.redisClient.Del(ctx, key).Err(); err != nil {
+	// 	u.logger.Errorf("[UserService-2] UpdateCustomer: %v", err)
+	// }
 
 	return nil
 }
@@ -209,10 +208,10 @@ func (u *userService) CreateCustomer(ctx context.Context, req entity.UserEntity)
 	}
 
 	// redis delete key
-	key := fmt.Sprintf("customer:%d", req.ID)
-	if err := u.redisClient.Del(ctx, key).Err(); err != nil {
-		u.logger.Errorf("[UserService-2] CreateCustomer: %v", err)
-	}
+	// key := fmt.Sprintf("customer:%d", req.ID)
+	// if err := u.redisClient.Del(ctx, key).Err(); err != nil {
+	// 	u.logger.Errorf("[UserService-2] CreateCustomer: %v", err)
+	// }
 
 	return customerId, nil
 }
@@ -221,21 +220,21 @@ func (u *userService) CreateCustomer(ctx context.Context, req entity.UserEntity)
 func (u *userService) GetCustomerById(ctx context.Context, customerId int64) (*entity.UserEntity, error) {
 	var (
 		customer entity.UserEntity
-		key      = fmt.Sprintf("customer:%d", customerId)
+		// key      = fmt.Sprintf("customer:%d", customerId)
 	)
 
 	// Check redis if data exists.
-	val, err := u.redisClient.Get(ctx, key).Result()
-	if err == nil {
-		// if key exists but value null, return data not found error
-		if val == "null" {
-			err := errors.New(utils.DATA_NOT_FOUND)
-			return nil, err
-		}
+	// val, err := u.redisClient.Get(ctx, key).Result()
+	// if err == nil {
+	// 	// if key exists but value null, return data not found error
+	// 	if val == "null" {
+	// 		err := errors.New(utils.DATA_NOT_FOUND)
+	// 		return nil, err
+	// 	}
 
-		json.Unmarshal([]byte(val), &customer)
-		return &customer, nil
-	}
+	// 	json.Unmarshal([]byte(val), &customer)
+	// 	return &customer, nil
+	// }
 
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
 		customerEntity, err := u.repo.GetCustomerById(txCtx, customerId)
@@ -248,21 +247,21 @@ func (u *userService) GetCustomerById(ctx context.Context, customerId int64) (*e
 		return nil
 	}); err != nil {
 		// Save to redis (create key with null value if data not found)
-		if err.Error() == utils.DATA_NOT_FOUND {
-			if err := u.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
-				u.logger.Errorf("[UserService-1] GetCustomerById: %v", err)
-			}
-		}
+		// if err.Error() == utils.DATA_NOT_FOUND {
+		// 	if err := u.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
+		// 		u.logger.Errorf("[UserService-1] GetCustomerById: %v", err)
+		// 	}
+		// }
 
 		u.logger.Errorf("[UserService-2] GetCustomerById: %v", err)
 		return nil, err
 	}
 
 	// Save to redis
-	jsonData, _ := json.Marshal(customer)
-	if err := u.redisClient.Set(ctx, key, jsonData, 1*time.Hour).Err(); err != nil {
-		u.logger.Errorf("[UserService-3] GetCustomerById: %v", err)
-	}
+	// jsonData, _ := json.Marshal(customer)
+	// if err := u.redisClient.Set(ctx, key, jsonData, 1*time.Hour).Err(); err != nil {
+	// 	u.logger.Errorf("[UserService-3] GetCustomerById: %v", err)
+	// }
 
 	return &customer, nil
 }
@@ -306,10 +305,10 @@ func (u *userService) UpdateProfile(ctx context.Context, req entity.UserEntity) 
 	}
 
 	// redis delete key
-	key := fmt.Sprintf("user:%d", req.ID)
-	if err := u.redisClient.Del(ctx, key).Err(); err != nil {
-		u.logger.Errorf("[UserService-2] UpdateProfile: %v", err)
-	}
+	// key := fmt.Sprintf("user:%d", req.ID)
+	// if err := u.redisClient.Del(ctx, key).Err(); err != nil {
+	// 	u.logger.Errorf("[UserService-2] UpdateProfile: %v", err)
+	// }
 
 	return nil
 }
@@ -318,21 +317,21 @@ func (u *userService) UpdateProfile(ctx context.Context, req entity.UserEntity) 
 func (u *userService) GetProfileById(ctx context.Context, userId int64) (*entity.UserEntity, error) {
 	var (
 		profile entity.UserEntity
-		key     = fmt.Sprintf("user:%d", userId)
+		// key     = fmt.Sprintf("user:%d", userId)
 	)
 
 	// Check redis if data exists.
-	val, err := u.redisClient.Get(ctx, key).Result()
-	if err == nil {
-		// if key exists but value null, return data not found error
-		if val == "null" {
-			err := errors.New(utils.DATA_NOT_FOUND)
-			return nil, err
-		}
+	// val, err := u.redisClient.Get(ctx, key).Result()
+	// if err == nil {
+	// 	// if key exists but value null, return data not found error
+	// 	if val == "null" {
+	// 		err := errors.New(utils.DATA_NOT_FOUND)
+	// 		return nil, err
+	// 	}
 
-		json.Unmarshal([]byte(val), &profile)
-		return &profile, nil
-	}
+	// 	json.Unmarshal([]byte(val), &profile)
+	// 	return &profile, nil
+	// }
 
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
 		profileEntity, err := u.repo.GetProfileById(txCtx, userId)
@@ -345,21 +344,21 @@ func (u *userService) GetProfileById(ctx context.Context, userId int64) (*entity
 		return nil
 	}); err != nil {
 		// Save to redis (create key with null value if data not found)
-		if err.Error() == utils.DATA_NOT_FOUND {
-			if err := u.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
-				u.logger.Errorf("[UserService-1] GetProfileById: %v", err)
-			}
-		}
+		// if err.Error() == utils.DATA_NOT_FOUND {
+		// 	if err := u.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
+		// 		u.logger.Errorf("[UserService-1] GetProfileById: %v", err)
+		// 	}
+		// }
 
 		u.logger.Errorf("[UserService-2] GetProfileById: %v", err)
 		return nil, err
 	}
 
 	// Save to redis
-	jsonData, _ := json.Marshal(profile)
-	if err := u.redisClient.Set(ctx, key, jsonData, 1*time.Hour).Err(); err != nil {
-		u.logger.Errorf("[UserService-3] GetProfileById: %v", err)
-	}
+	// jsonData, _ := json.Marshal(profile)
+	// if err := u.redisClient.Set(ctx, key, jsonData, 1*time.Hour).Err(); err != nil {
+	// 	u.logger.Errorf("[UserService-3] GetProfileById: %v", err)
+	// }
 
 	return &profile, nil
 }
@@ -446,20 +445,20 @@ func (u *userService) VerifyToken(ctx context.Context, token string) (*entity.Us
 			return err
 		}
 
-		sessionData := map[string]any{
-			"user_id":    tokenEntity.UserID,
-			"name":       tokenEntity.User.Name,
-			"email":      tokenEntity.User.Email,
-			"logged_in":  true,
-			"created_at": time.Now().String(),
-			"token":      accessToken,
-			"role_name":  tokenEntity.User.RoleName,
-		}
-		sessionDataJson, _ := conv.ToJSON(sessionData)
+		// sessionData := map[string]any{
+		// 	"user_id":    tokenEntity.UserID,
+		// 	"name":       tokenEntity.User.Name,
+		// 	"email":      tokenEntity.User.Email,
+		// 	"logged_in":  true,
+		// 	"created_at": time.Now().String(),
+		// 	"token":      accessToken,
+		// 	"role_name":  tokenEntity.User.RoleName,
+		// }
+		// sessionDataJson, _ := conv.ToJSON(sessionData)
 
-		if err := u.redisClient.Set(ctx, accessToken, sessionDataJson, time.Hour*23).Err(); err != nil {
-			return err
-		}
+		// if err := u.redisClient.Set(ctx, accessToken, sessionDataJson, time.Hour*23).Err(); err != nil {
+		// 	return err
+		// }
 
 		tokenEntity.User.Token = accessToken
 
@@ -589,7 +588,7 @@ func (u *userService) SignIn(ctx context.Context, req entity.UserEntity) (*entit
 	)
 
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		userEntity, err := u.repo.GetUserByEmail(txCtx, req.Email)
+		userEntity, err := u.cacheUser.SignInByEmail(txCtx, req.Email)
 		if err != nil {
 			return err
 		}
@@ -604,30 +603,16 @@ func (u *userService) SignIn(ctx context.Context, req entity.UserEntity) (*entit
 			return err
 		}
 
-		tokenEntity, err := u.jwtService.GenerateToken(userEntity.ID)
+		tokenString, err := u.jwtService.GenerateToken(userEntity.ID)
 		if err != nil {
 			return err
 		}
 
-		sessionData := map[string]any{
-			"user_id":    userEntity.ID,
-			"name":       userEntity.Name,
-			"email":      userEntity.Email,
-			"logged_in":  true,
-			"created_at": time.Now().String(),
-			"token":      tokenEntity,
-			"role_name":  userEntity.RoleName,
-		}
-		sessionDataJson, err := conv.ToJSON(sessionData)
-		if err != nil {
+		if err := u.cacheUser.SignInSuccess(txCtx, tokenString, userEntity); err != nil {
 			return err
 		}
 
-		if err := u.redisClient.Set(txCtx, tokenEntity, sessionDataJson, time.Hour*23).Err(); err != nil {
-			return err
-		}
-
-		user, token = userEntity, tokenEntity
+		user, token = userEntity, tokenString
 
 		return nil
 	}); err != nil {

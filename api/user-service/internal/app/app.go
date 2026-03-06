@@ -9,6 +9,7 @@ import (
 	"user-service/config"
 	"user-service/internal/adapter/handler"
 	"user-service/internal/adapter/repository"
+	"user-service/internal/adapter/repository/cache"
 	"user-service/internal/adapter/storage"
 	"user-service/internal/core/service"
 	"user-service/utils/logger"
@@ -62,9 +63,11 @@ func RunServer() {
 	roleRepo := repository.NewRoleRepository(db.DB, customLogger.Logger())
 	outboxEventRepo := repository.NewOutboxEventRepository(db.DB, customLogger.Logger())
 
+	cacheUser := cache.NewUserCache(redisClient, userRepo, customLogger.Logger())
+
 	jwtService := service.NewJwtService(cfg)
 	roleService := service.NewRoleService(roleRepo, redisClient, txManager, customLogger.Logger())
-	userService := service.NewUserService(userRepo, cfg, jwtService, tokenRepo, outboxEventRepo, roleService, redisClient, txManager, customLogger.Logger())
+	userService := service.NewUserService(userRepo, cfg, jwtService, tokenRepo, outboxEventRepo, roleService, cacheUser, txManager, customLogger.Logger())
 
 	handler.NewUserHandler(e, userService, cfg, jwtService, redisClient)
 	handler.NewUploadImageStorageHandler(e, cfg, jwtService, storageHandler, redisClient)

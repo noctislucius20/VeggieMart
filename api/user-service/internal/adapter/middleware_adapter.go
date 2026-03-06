@@ -3,6 +3,7 @@ package adapter
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"user-service/config"
@@ -47,7 +48,8 @@ func (m *middlewareAdapter) CheckToken() echo.MiddlewareFunc {
 				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 			}
 
-			getSession, err := m.redisClient.Get(c.Request().Context(), tokenString).Result()
+			key := fmt.Sprintf("signin:token:%s", tokenString)
+			getSession, err := m.redisClient.Get(c.Request().Context(), key).Result()
 			if err != nil {
 				m.logger.Errorf("[MiddlewareAdapter-3] CheckToken: %v", err.Error())
 				if errors.Is(err, redis.Nil) {
