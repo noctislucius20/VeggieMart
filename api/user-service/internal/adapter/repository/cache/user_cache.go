@@ -18,21 +18,69 @@ import (
 type UserCacheInterface interface {
 	SignInByEmail(ctx context.Context, email string) (*entity.UserEntity, error)
 	SignInSuccess(ctx context.Context, token string, userEntity *entity.UserEntity) error
+	VerifyUserByToken(ctx context.Context, token string) (*entity.VerificationTokenEntity, error)
 	VerifyUserSuccess(ctx context.Context, token string, tokenEntity *entity.VerificationTokenEntity) error
 }
 
 type userCache struct {
 	redisClient *redis.Client
 	repoUser    repository.UserRepositoryInterface
+	repoToken   repository.VerificationTokenRepositoryInterface
 	logger      *log.Logger
 }
 
-func NewUserCache(redisClient *redis.Client, repoUser repository.UserRepositoryInterface, logger *log.Logger) UserCacheInterface {
+func NewUserCache(redisClient *redis.Client, repoUser repository.UserRepositoryInterface, repoToken repository.VerificationTokenRepositoryInterface, logger *log.Logger) UserCacheInterface {
 	return &userCache{
 		redisClient: redisClient,
 		repoUser:    repoUser,
+		repoToken:   repoToken,
 		logger:      logger,
 	}
+}
+
+// VerifyUserByToken implements [UserCacheInterface].
+func (u *userCache) VerifyUserByToken(ctx context.Context, token string) (*entity.VerificationTokenEntity, error) {
+	var (
+		tokenData entity.VerificationTokenEntity
+		key       = fmt.Sprintf("verifyuser:token:%s", token)
+	)
+
+	// Check redis if data exists.
+	val, err := u.redisClient.Get(ctx, key).Result()
+	if err == nil {
+		// if key exists but value null, return data not found error
+		if val == "null" {
+			err := errors.New(utils.TOKEN_INVALID)
+			u.logger.Errorf("[UserCache-1] VerifyUserByToken: %v", err)
+			return nil, err
+		}
+
+		json.Unmarshal([]byte(val), &tokenData)
+
+		return &tokenData, nil
+	}
+
+	tokenEntity, err := u.repoToken.GetDataByToken(ctx, token)
+	if err != nil {
+		if err.Error() == utils.TOKEN_INVALID {
+			if err := u.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
+				u.logger.Errorf("[UserCache-2] VerifyUserByToken: %v", err)
+			}
+		}
+
+		u.logger.Errorf("[UserCache-3] VerifyUserByToken: %v", err)
+		return nil, err
+	}
+
+	tokenData = *tokenEntity
+
+	// Save to redis
+	jsonData, _ := json.Marshal(tokenEntity)
+	if err := u.redisClient.Set(ctx, key, jsonData, 1*time.Minute).Err(); err != nil {
+		u.logger.Errorf("[UserCache-4] VerifyUserByToken: %v", err)
+	}
+
+	return &tokenData, nil
 }
 
 // VerifyUserSuccess implements [UserCacheInterface].

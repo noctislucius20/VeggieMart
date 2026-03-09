@@ -414,7 +414,7 @@ func (u *userService) VerifyToken(ctx context.Context, token string) (*entity.Us
 	var user *entity.UserEntity
 
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		tokenEntity, err := u.repoToken.GetDataByToken(txCtx, token)
+		tokenEntity, err := u.cacheUser.VerifyUserByToken(txCtx, token)
 		if err != nil {
 			return err
 		}
@@ -445,20 +445,9 @@ func (u *userService) VerifyToken(ctx context.Context, token string) (*entity.Us
 			return err
 		}
 
-		// sessionData := map[string]any{
-		// 	"user_id":    tokenEntity.UserID,
-		// 	"name":       tokenEntity.User.Name,
-		// 	"email":      tokenEntity.User.Email,
-		// 	"logged_in":  true,
-		// 	"created_at": time.Now().String(),
-		// 	"token":      accessToken,
-		// 	"role_name":  tokenEntity.User.RoleName,
-		// }
-		// sessionDataJson, _ := conv.ToJSON(sessionData)
-
-		// if err := u.redisClient.Set(ctx, accessToken, sessionDataJson, time.Hour*23).Err(); err != nil {
-		// 	return err
-		// }
+		if err := u.cacheUser.VerifyUserSuccess(txCtx, accessToken, tokenEntity); err != nil {
+			return err
+		}
 
 		tokenEntity.User.Token = accessToken
 
