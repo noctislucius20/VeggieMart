@@ -118,7 +118,7 @@ func (u *userService) UpdateCustomer(ctx context.Context, req entity.UserEntity)
 			req.Password = hashedPassword
 		}
 
-		roleEntity, err := u.roleService.GetRoleByIdAdmin(txCtx, 2)
+		roleEntity, err := u.roleService.GetRoleByNameAdmin(txCtx, "Customer")
 		if err != nil {
 			return err
 		}
@@ -172,7 +172,7 @@ func (u *userService) CreateCustomer(ctx context.Context, req entity.UserEntity)
 
 		req.Password = hashedPassword
 
-		roleEntity, err := u.roleService.GetRoleByIdAdmin(txCtx, 2)
+		roleEntity, err := u.roleService.GetRoleByNameAdmin(txCtx, "Customer")
 		if err != nil {
 			return err
 		}
@@ -520,7 +520,7 @@ func (u *userService) CreateUserAccount(ctx context.Context, req entity.UserEnti
 			return err
 		}
 
-		roleEntity, err := u.roleService.GetRoleByIdAdmin(txCtx, 2)
+		roleEntity, err := u.roleService.GetRoleByNameAdmin(txCtx, "Customer")
 		if err != nil {
 			return err
 		}
