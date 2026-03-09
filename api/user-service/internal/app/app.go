@@ -64,9 +64,10 @@ func RunServer() {
 	outboxEventRepo := repository.NewOutboxEventRepository(db.DB, customLogger.Logger())
 
 	cacheUser := cache.NewUserCache(redisClient, userRepo, tokenRepo, customLogger.Logger())
+	cacheRole := cache.NewRoleCache(redisClient, roleRepo, customLogger.Logger())
 
 	jwtService := service.NewJwtService(cfg)
-	roleService := service.NewRoleService(roleRepo, redisClient, txManager, customLogger.Logger())
+	roleService := service.NewRoleService(roleRepo, redisClient, cacheRole, txManager, customLogger.Logger())
 	userService := service.NewUserService(userRepo, cfg, jwtService, tokenRepo, outboxEventRepo, roleService, cacheUser, txManager, customLogger.Logger())
 
 	handler.NewUserHandler(e, userService, cfg, jwtService, redisClient)
