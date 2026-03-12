@@ -13,7 +13,6 @@ import (
 	"user-service/utils"
 	"user-service/utils/conv"
 
-	"github.com/google/uuid"
 	"github.com/labstack/gommon/log"
 )
 
@@ -177,7 +176,7 @@ func (u *userService) CreateCustomer(ctx context.Context, req entity.UserEntity)
 			return err
 		}
 
-		customer, err := u.repo.CreateCustomer(txCtx, req)
+		customerIdCreated, err := u.repo.CreateCustomer(txCtx, req)
 		if err != nil {
 			return err
 		}
@@ -203,7 +202,7 @@ func (u *userService) CreateCustomer(ctx context.Context, req entity.UserEntity)
 			return err
 		}
 
-		customerId = customer
+		customerId = customerIdCreated
 
 		return nil
 	}); err != nil {
@@ -265,28 +264,33 @@ func (u *userService) GetCustomersAll(ctx context.Context, query entity.QueryStr
 // UpdateProfile implements UserServiceInterface.
 func (u *userService) UpdateProfile(ctx context.Context, req entity.UserEntity) error {
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		userEntity, err := u.repo.UpdateProfile(txCtx, req)
+		if err := u.repo.UpdateProfile(txCtx, req); err != nil {
+			return err
+		}
+
+		roleEntity, err := u.roleService.GetRoleByIdAdmin(txCtx, req.RoleID)
 		if err != nil {
+			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
 			return err
 		}
 
-		if err := u.cacheUser.DeleteUserCache(txCtx, userEntity.ID); err != nil {
+		if err := u.cacheUser.DeleteUserCache(txCtx, req.ID); err != nil {
 			return err
 		}
 
-		tokenString, err := u.jwtService.GenerateToken(userEntity.ID)
+		tokenString, err := u.jwtService.GenerateToken(req.ID)
 		if err != nil {
 			return err
 		}
 
 		session := entity.SessionEntity{
-			UserID:    userEntity.ID,
-			Name:      userEntity.Name,
-			Email:     userEntity.Email,
+			UserID:    req.ID,
+			Name:      req.Name,
+			Email:     req.Email,
 			LoggedIn:  true,
 			CreatedAt: time.Now().String(),
 			Token:     tokenString,
-			RoleName:  userEntity.RoleName,
+			RoleID:    roleEntity.ID,
 		}
 
 		if err := u.cacheUser.SetUserSession(txCtx, session); err != nil {
@@ -314,6 +318,14 @@ func (u *userService) GetProfileById(ctx context.Context, userId int64) (*entity
 			return err
 		}
 
+		roleEntity, err := u.roleService.GetRoleByIdAdmin(txCtx, profileEntity.RoleID)
+		if err != nil {
+			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+			return err
+		}
+
+		profileEntity.RoleName = roleEntity.Name
+
 		profile = *profileEntity
 
 		return nil
@@ -340,10 +352,6 @@ func (u *userService) UpdatePassword(ctx context.Context, req entity.UserEntity)
 
 		if time.Now().After(tokenEntity.ExpiresAt) {
 			err := errors.New(utils.TOKEN_EXPIRED)
-			if err := u.repoToken.DeleteVerificationToken(txCtx, tokenEntity.ID); err != nil {
-				return err
-			}
-
 			return err
 		}
 
@@ -396,9 +404,6 @@ func (u *userService) ActivateAccount(ctx context.Context, token string) (*entit
 
 		if time.Now().After(tokenEntity.ExpiresAt) {
 			err := errors.New(utils.TOKEN_EXPIRED)
-			if err := u.repoToken.DeleteVerificationToken(txCtx, tokenEntity.ID); err != nil {
-				return err
-			}
 			return err
 		}
 
@@ -420,20 +425,27 @@ func (u *userService) ActivateAccount(ctx context.Context, token string) (*entit
 		}
 
 		session = entity.SessionEntity{
-			UserID:    tokenEntity.UserID,
+			UserID:    tokenEntity.User.ID,
 			Name:      tokenEntity.User.Name,
 			Email:     tokenEntity.User.Email,
 			LoggedIn:  true,
 			CreatedAt: time.Now().String(),
 			Token:     accessToken,
-			RoleName:  tokenEntity.User.RoleName,
+			RoleID:    tokenEntity.User.RoleID,
 		}
 
 		if err := u.cacheUser.SetUserSession(txCtx, session); err != nil {
 			return err
 		}
 
+		roleEntity, err := u.roleService.GetRoleByIdAdmin(txCtx, tokenEntity.User.RoleID)
+		if err != nil {
+			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+			return err
+		}
+
 		tokenEntity.User.Token = accessToken
+		tokenEntity.User.RoleName = roleEntity.Name
 
 		user = &tokenEntity.User
 
@@ -459,10 +471,9 @@ func (u *userService) ForgotPassword(ctx context.Context, req entity.UserEntity)
 			return err
 		}
 
-		token := uuid.New().String()
 		reqEntity := entity.VerificationTokenEntity{
 			UserID:    user.ID,
-			Token:     token,
+			Token:     req.Token,
 			TokenType: utils.NOTIF_EMAIL_FORGOT_PASSWORD,
 		}
 
@@ -470,7 +481,7 @@ func (u *userService) ForgotPassword(ctx context.Context, req entity.UserEntity)
 			return err
 		}
 
-		urlForgot := fmt.Sprintf("%s/reset-password?token=%s", u.cfg.App.UrlUsersService, token)
+		urlForgot := fmt.Sprintf("%s/reset-password?token=%s", u.cfg.App.UrlUsersService, req.Token)
 		payloadMessage := fmt.Sprintf("Please click link below to reset your password: %v", urlForgot)
 
 		publishEmailPayload := map[string]any{
@@ -503,14 +514,12 @@ func (u *userService) CreateUserAccount(ctx context.Context, req entity.UserEnti
 			return err
 		}
 
-		roleEntity, err := u.roleService.GetRoleByNameAdmin(txCtx, "Customer")
-		if err != nil {
+		if _, err := u.roleService.GetRoleByIdAdmin(txCtx, req.RoleID); err != nil {
+			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
 			return err
 		}
 
 		req.Password = password
-		req.Token = uuid.New().String()
-		req.RoleID = roleEntity.ID
 
 		userIdCreated, err := u.repo.CreateUserAccount(txCtx, req)
 		if err != nil {
@@ -594,7 +603,7 @@ func (u *userService) SignIn(ctx context.Context, req entity.UserEntity) (*entit
 			LoggedIn:  true,
 			CreatedAt: time.Now().String(),
 			Token:     tokenString,
-			RoleName:  userEntity.RoleName,
+			RoleID:    userEntity.RoleID,
 		}
 
 		if err := u.cacheUser.SetUserSession(txCtx, session); err != nil {

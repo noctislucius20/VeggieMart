@@ -25,5 +25,5 @@ type VerificationTokenDTO struct {
 	ExpiresAt time.Time
 	UserEmail string
 	UserName  string
-	RoleName  string
+	RoleID    int64
 }

@@ -20,7 +20,7 @@ type UserRepositoryInterface interface {
 	UpdateUserVerified(ctx context.Context, userId int64) error
 	UpdatePasswordById(ctx context.Context, req entity.UserEntity) error
 	GetProfileById(ctx context.Context, userId int64) (*entity.UserEntity, error)
-	UpdateProfile(ctx context.Context, req entity.UserEntity) (*entity.UserEntity, error)
+	UpdateProfile(ctx context.Context, req entity.UserEntity) error
 
 	// Admin customer management functions can be added here
 	GetAllCustomers(ctx context.Context, query entity.QueryStringEntity) ([]entity.UserEntity, int64, int64, error)
@@ -84,44 +84,10 @@ func (u *userRepository) DeleteCustomer(ctx context.Context, customerId int64) e
 // UpdateCustomers implements UserRepositoryInterface.
 func (u *userRepository) UpdateCustomer(ctx context.Context, req entity.UserEntity) error {
 	var (
-		db            = u.getDB(ctx)
-		modelRole     model.Role
-		modelUser     model.User
-		filteredUsers []model.User
-		foundByID     *model.User
-		foundByEmail  *model.User
+		db        = u.getDB(ctx)
+		modelRole model.Role
+		modelUser model.User
 	)
-
-	if err := db.WithContext(ctx).
-		Select("id", "email", "is_verified").
-		Where("id = ? OR email = ?", req.ID, req.Email).
-		Find(&filteredUsers).Error; err != nil {
-		u.logger.Errorf("[UserRepository-1] UpdateCustomer: %v", err)
-		return err
-	}
-
-	// Separate query result filtered by id or email
-	for i := range filteredUsers {
-		if filteredUsers[i].ID == req.ID {
-			foundByID = &filteredUsers[i]
-		}
-		if filteredUsers[i].Email == req.Email {
-			foundByEmail = &filteredUsers[i]
-		}
-	}
-
-	if foundByID == nil {
-		err := errors.New(utils.DATA_NOT_FOUND)
-		u.logger.Errorf("[UserRepository-2] UpdateCustomer: %v", err)
-		return err
-	}
-
-	// Other user's email
-	if foundByEmail != nil && foundByEmail.ID != req.ID {
-		err := errors.New(utils.EMAIL_ALREADY_EXISTS)
-		u.logger.Errorf("[UserRepository-3] UpdateCustomer: %v", err)
-		return err
-	}
 
 	modelRole = model.Role{
 		ID: req.RoleID,
@@ -143,8 +109,26 @@ func (u *userRepository) UpdateCustomer(ctx context.Context, req entity.UserEnti
 		modelUser.Password = req.Password
 	}
 
-	if err := db.WithContext(ctx).Updates(&modelUser).Error; err != nil {
-		u.logger.Errorf("[UserRepository-4] UpdateCustomer: %v", err)
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Updates(&modelUser)
+		if result.Error != nil {
+			return result.Error
+		}
+
+		if result.RowsAffected == 0 {
+			err := errors.New(utils.DATA_NOT_FOUND)
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		u.logger.Errorf("[UserRepository-1] UpdateCustomer: %v", err)
+
+		if strings.Contains(err.Error(), "duplicate key") {
+			err := errors.New(utils.EMAIL_ALREADY_EXISTS)
+			return err
+		}
+
 		return err
 	}
 
@@ -153,34 +137,11 @@ func (u *userRepository) UpdateCustomer(ctx context.Context, req entity.UserEnti
 
 // CreateCustomer implements UserRepositoryInterface.
 func (u *userRepository) CreateCustomer(ctx context.Context, req entity.UserEntity) (int64, error) {
-
 	var (
 		db        = u.getDB(ctx)
 		modelRole model.Role
 		modelUser model.User
 	)
-
-	if err := db.WithContext(ctx).
-		Select("is_verified", "email").
-		Where("email = ?", req.Email).
-		Find(&modelUser).
-		Limit(1).Error; err != nil {
-		u.logger.Errorf("[UserRepository-1] CreateCustomer: %v", err)
-		return 0, err
-	}
-
-	if modelUser.Email != "" {
-		switch modelUser.IsVerified {
-		case true:
-			err := errors.New(utils.EMAIL_ALREADY_EXISTS)
-			u.logger.Errorf("[UserRepository-2] CreateCustomer: %v", err)
-			return 0, err
-		case false:
-			err := errors.New(utils.EMAIL_NOT_VERIFIED)
-			u.logger.Errorf("[UserRepository-3] CreateCustomer: %v", err)
-			return 0, err
-		}
-	}
 
 	modelRole = model.Role{
 		ID: req.RoleID,
@@ -199,8 +160,32 @@ func (u *userRepository) CreateCustomer(ctx context.Context, req entity.UserEnti
 		IsVerified: true,
 	}
 
-	if err := db.WithContext(ctx).Create(&modelUser).Error; err != nil {
-		u.logger.Errorf("[UserRepository-4] CreateCustomer: %v", err)
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&modelUser).Error; err != nil {
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		u.logger.Errorf("[UserRepository-1] CreateCustomer: %v", err)
+
+		if strings.Contains(err.Error(), "duplicate key") {
+			if err := db.WithContext(ctx).
+				Select("is_verified").
+				Where("email = ?", req.Email).
+				First(&modelUser).Error; err != nil {
+				return 0, err
+			}
+
+			if modelUser.IsVerified {
+				err := errors.New(utils.EMAIL_ALREADY_EXISTS)
+				return 0, err
+			}
+
+			err := errors.New(utils.EMAIL_NOT_VERIFIED)
+			return 0, err
+		}
+
 		return 0, err
 	}
 
@@ -242,7 +227,6 @@ func (u *userRepository) GetCustomerById(ctx context.Context, customerId int64) 
 		Name:       modelUser.Name,
 		Email:      modelUser.Email,
 		RoleID:     modelUser.Roles[0].ID,
-		RoleName:   modelUser.Roles[0].Name,
 		Address:    modelUser.Address,
 		Lat:        modelUser.Lat,
 		Lng:        modelUser.Lng,
@@ -359,57 +343,11 @@ func (u *userRepository) GetAllCustomers(ctx context.Context, query entity.Query
 }
 
 // UpdateProfile implements UserRepositoryInterface.
-func (u *userRepository) UpdateProfile(ctx context.Context, req entity.UserEntity) (*entity.UserEntity, error) {
+func (u *userRepository) UpdateProfile(ctx context.Context, req entity.UserEntity) error {
 	var (
-		db            = u.getDB(ctx)
-		modelUser     model.User
-		filteredUsers []model.User
-		foundByID     *model.User
-		foundByEmail  *model.User
+		db        = u.getDB(ctx)
+		modelUser model.User
 	)
-
-	if err := db.WithContext(ctx).
-		Select("id", "email", "is_verified", "name").
-		Preload("Roles", func(db *gorm.DB) *gorm.DB {
-			return db.Select("id", "name")
-		}).
-		Where("id = ? OR email = ?", req.ID, req.Email).
-		Find(&filteredUsers).Error; err != nil {
-		u.logger.Errorf("[UserRepository-1] UpdateProfile: %v", err)
-		return nil, err
-	}
-
-	// Separate query result filtered by id or email
-	for i := range filteredUsers {
-		if filteredUsers[i].ID == req.ID {
-			foundByID = &filteredUsers[i]
-		}
-		if filteredUsers[i].Email == req.Email {
-			foundByEmail = &filteredUsers[i]
-		}
-	}
-
-	if foundByID == nil {
-		err := errors.New(utils.DATA_NOT_FOUND)
-		u.logger.Errorf("[UserRepository-2] UpdateProfile: %v", err)
-		return nil, err
-	}
-
-	if foundByEmail != nil {
-		// User's email
-		if foundByEmail.ID == req.ID {
-			if !foundByEmail.IsVerified {
-				err := errors.New(utils.EMAIL_NOT_VERIFIED)
-				u.logger.Errorf("[UserRepository-3] UpdateProfile: %v", err)
-				return nil, err
-			}
-		} else {
-			// Other user's email
-			err := errors.New(utils.EMAIL_ALREADY_EXISTS)
-			u.logger.Errorf("[UserRepository-4] UpdateProfile: %v", err)
-			return nil, err
-		}
-	}
 
 	modelUser = model.User{
 		ID:      req.ID,
@@ -422,17 +360,42 @@ func (u *userRepository) UpdateProfile(ctx context.Context, req entity.UserEntit
 		Photo:   req.Photo,
 	}
 
-	if err := db.WithContext(ctx).Updates(&modelUser).Error; err != nil {
-		u.logger.Errorf("[UserRepository-5] UpdateProfile: %v", err)
-		return nil, err
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Updates(&modelUser)
+		if result.Error != nil {
+			return result.Error
+		}
+
+		if result.RowsAffected == 0 {
+			err := errors.New(utils.DATA_NOT_FOUND)
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		u.logger.Errorf("[UserRepository-1] UpdateProfile: %v", err)
+
+		if strings.Contains(err.Error(), "duplicate key") {
+			if err := db.WithContext(ctx).
+				Select("is_verified").
+				Where("email = ?", req.Email).
+				First(&modelUser).Error; err != nil {
+				return err
+			}
+
+			if modelUser.IsVerified {
+				err := errors.New(utils.EMAIL_ALREADY_EXISTS)
+				return err
+			}
+
+			err := errors.New(utils.EMAIL_NOT_VERIFIED)
+			return err
+		}
+
+		return err
 	}
 
-	return &entity.UserEntity{
-		ID:       foundByID.ID,
-		Email:    foundByID.Email,
-		Name:     foundByID.Name,
-		RoleName: foundByID.Roles[0].Name,
-	}, nil
+	return nil
 }
 
 // GetProfileById implements UserRepositoryInterface.
@@ -444,7 +407,9 @@ func (u *userRepository) GetProfileById(ctx context.Context, userId int64) (*ent
 
 	if err := db.WithContext(ctx).
 		Where("id = ? AND is_verified = ?", userId, true).
-		Preload("Roles").
+		Preload("Roles", func(db *gorm.DB) *gorm.DB {
+			return db.Select("id")
+		}).
 		First(&modelUser).Error; err != nil {
 		u.logger.Errorf("[UserRepository-1] GetProfileById: %v", err)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -455,15 +420,15 @@ func (u *userRepository) GetProfileById(ctx context.Context, userId int64) (*ent
 	}
 
 	return &entity.UserEntity{
-		ID:       modelUser.ID,
-		Name:     modelUser.Email,
-		Email:    modelUser.Name,
-		RoleName: modelUser.Roles[0].Name,
-		Address:  modelUser.Address,
-		Lat:      modelUser.Lat,
-		Lng:      modelUser.Lng,
-		Phone:    modelUser.Phone,
-		Photo:    modelUser.Photo,
+		ID:      modelUser.ID,
+		Name:    modelUser.Email,
+		Email:   modelUser.Name,
+		RoleID:  modelUser.Roles[0].ID,
+		Address: modelUser.Address,
+		Lat:     modelUser.Lat,
+		Lng:     modelUser.Lng,
+		Phone:   modelUser.Phone,
+		Photo:   modelUser.Photo,
 	}, nil
 }
 
@@ -535,33 +500,31 @@ func (u *userRepository) CreateUserAccount(ctx context.Context, req entity.UserE
 	}
 
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := db.WithContext(ctx).Create(&modelUser).Error; err != nil {
+		if err := tx.Create(&modelUser).Error; err != nil {
 			return err
 		}
 
 		return nil
 	}); err != nil {
+		u.logger.Errorf("[UserRepository-1] CreateUserAccount: %v", err)
+
 		if strings.Contains(err.Error(), "duplicate key") {
 			if err := db.WithContext(ctx).
 				Select("is_verified").
 				Where("email = ?", req.Email).
 				First(&modelUser).Error; err != nil {
-				u.logger.Errorf("[UserRepository-1] CreateUserAccount: %v", err)
 				return 0, err
 			}
 
 			if modelUser.IsVerified {
 				err := errors.New(utils.EMAIL_ALREADY_EXISTS)
-				u.logger.Errorf("[UserRepository-2] CreateUserAccount: %v", err)
 				return 0, err
 			}
 
 			err := errors.New(utils.EMAIL_NOT_VERIFIED)
-			u.logger.Errorf("[UserRepository-3] CreateUserAccount: %v", err)
 			return 0, err
 		}
 
-		u.logger.Errorf("[UserRepository-4] CreateUserAccount: %v", err)
 		return 0, err
 	}
 
@@ -579,7 +542,7 @@ func (u *userRepository) GetUserByEmail(ctx context.Context, email string) (*ent
 		Omit("created_at", "deleted_at", "updated_at").
 		Where("email = ?", email).
 		Preload("Roles", func(db *gorm.DB) *gorm.DB {
-			return db.Select("id", "name")
+			return db.Select("id")
 		}).
 		First(&modelUser).Error; err != nil {
 		u.logger.Errorf("[UserRepository-1] GetUserByEmail: %v", err)
@@ -595,7 +558,7 @@ func (u *userRepository) GetUserByEmail(ctx context.Context, email string) (*ent
 		Name:       modelUser.Name,
 		Password:   modelUser.Password,
 		Email:      modelUser.Email,
-		RoleName:   modelUser.Roles[0].Name,
+		RoleID:     modelUser.Roles[0].ID,
 		Address:    modelUser.Address,
 		Lat:        modelUser.Lat,
 		Lng:        modelUser.Lng,

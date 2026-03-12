@@ -31,5 +31,5 @@ type SessionEntity struct {
 	LoggedIn  bool   `json:"logged_in"`
 	CreatedAt string `json:"created_at"`
 	Token     string `json:"token"`
-	RoleName  string `json:"role_name"`
+	RoleID    int64  `json:"role_id"`
 }

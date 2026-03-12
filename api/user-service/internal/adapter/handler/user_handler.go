@@ -17,6 +17,7 @@ import (
 	"user-service/utils/logger"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
@@ -450,6 +451,7 @@ func (u *userHandler) UpdateProfile(c echo.Context) error {
 		Lng:     lngString,
 		Phone:   phoneString,
 		Photo:   req.Photo,
+		RoleID:  2,
 	}
 
 	if err := u.userService.UpdateProfile(ctx, reqEntity); err != nil {
@@ -598,7 +600,7 @@ func (u *userHandler) ActivateAccount(c echo.Context) error {
 		ID:          user.ID,
 		Name:        user.Name,
 		Email:       user.Email,
-		Role:        user.RoleName,
+		RoleName:    user.RoleName,
 		AccessToken: user.Token,
 	}
 
@@ -624,6 +626,7 @@ func (u *userHandler) ForgotPassword(c echo.Context) error {
 
 	reqEntity := entity.UserEntity{
 		Email: req.Email,
+		Token: uuid.New().String(),
 	}
 
 	if err := u.userService.ForgotPassword(ctx, reqEntity); err != nil {
@@ -667,6 +670,8 @@ func (u *userHandler) CreateUserAccount(c echo.Context) error {
 		Name:     req.Name,
 		Email:    req.Email,
 		Password: req.Password,
+		Token:    uuid.New().String(),
+		RoleID:   2,
 	}
 
 	userId, err := u.userService.CreateUserAccount(ctx, reqEntity)
@@ -731,7 +736,7 @@ func (u *userHandler) SignIn(c echo.Context) error {
 		ID:          user.ID,
 		Name:        user.Name,
 		Email:       user.Email,
-		Role:        user.RoleName,
+		RoleName:    user.RoleName,
 		Phone:       user.Phone,
 		Lat:         user.Lat,
 		Lng:         user.Lng,

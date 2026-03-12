@@ -69,7 +69,7 @@ func (v *verificationTokenRepository) GetDataByToken(ctx context.Context, token 
 		verification_tokens.expires_at AS expires_at,
 		users.name AS user_name,
 		users.email AS user_email,
-		roles.name AS role_name
+		roles.id AS role_id
 	`
 	if err := db.WithContext(ctx).
 		Model(&model.VerificationToken{}).
@@ -78,7 +78,7 @@ func (v *verificationTokenRepository) GetDataByToken(ctx context.Context, token 
 		Joins("INNER JOIN user_role ON users.id = user_role.user_id").
 		Joins("INNER JOIN roles ON user_role.role_id = roles.id").
 		Where("verification_tokens.token = ?", token).
-		Where("roles.name = ?", "Customer").
+		Where("roles.id = ?", 2).
 		First(&tokenDTO).Error; err != nil {
 		log.Errorf("[VerificationTokenRepository-1] GetDataByToken: %v", err)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -95,10 +95,10 @@ func (v *verificationTokenRepository) GetDataByToken(ctx context.Context, token 
 		TokenType: tokenDTO.TokenType,
 		ExpiresAt: tokenDTO.ExpiresAt,
 		User: entity.UserEntity{
-			ID:       tokenDTO.UserID,
-			Email:    tokenDTO.UserEmail,
-			Name:     tokenDTO.UserName,
-			RoleName: tokenDTO.RoleName,
+			ID:     tokenDTO.UserID,
+			Email:  tokenDTO.UserEmail,
+			Name:   tokenDTO.UserName,
+			RoleID: tokenDTO.RoleID,
 		},
 	}, nil
 }
