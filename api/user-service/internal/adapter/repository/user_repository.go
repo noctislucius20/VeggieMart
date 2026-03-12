@@ -20,7 +20,7 @@ type UserRepositoryInterface interface {
 	UpdateUserVerified(ctx context.Context, userId int64) error
 	UpdatePasswordById(ctx context.Context, req entity.UserEntity) error
 	GetProfileById(ctx context.Context, userId int64) (*entity.UserEntity, error)
-	UpdateProfile(ctx context.Context, req entity.UserEntity) error
+	UpdateProfile(ctx context.Context, req entity.UserEntity) (*entity.UserEntity, error)
 
 	// Admin customer management functions can be added here
 	GetAllCustomers(ctx context.Context, query entity.QueryStringEntity) ([]entity.UserEntity, int64, int64, error)
@@ -124,7 +124,7 @@ func (u *userRepository) UpdateCustomer(ctx context.Context, req entity.UserEnti
 	}
 
 	modelRole = model.Role{
-		ID: req.RoleId,
+		ID: req.RoleID,
 	}
 
 	modelUser = model.User{
@@ -183,7 +183,7 @@ func (u *userRepository) CreateCustomer(ctx context.Context, req entity.UserEnti
 	}
 
 	modelRole = model.Role{
-		ID: req.RoleId,
+		ID: req.RoleID,
 	}
 
 	modelUser = model.User{
@@ -241,7 +241,7 @@ func (u *userRepository) GetCustomerById(ctx context.Context, customerId int64) 
 		ID:         modelUser.ID,
 		Name:       modelUser.Name,
 		Email:      modelUser.Email,
-		RoleId:     modelUser.Roles[0].ID,
+		RoleID:     modelUser.Roles[0].ID,
 		RoleName:   modelUser.Roles[0].Name,
 		Address:    modelUser.Address,
 		Lat:        modelUser.Lat,
@@ -359,7 +359,7 @@ func (u *userRepository) GetAllCustomers(ctx context.Context, query entity.Query
 }
 
 // UpdateProfile implements UserRepositoryInterface.
-func (u *userRepository) UpdateProfile(ctx context.Context, req entity.UserEntity) error {
+func (u *userRepository) UpdateProfile(ctx context.Context, req entity.UserEntity) (*entity.UserEntity, error) {
 	var (
 		db            = u.getDB(ctx)
 		modelUser     model.User
@@ -369,11 +369,14 @@ func (u *userRepository) UpdateProfile(ctx context.Context, req entity.UserEntit
 	)
 
 	if err := db.WithContext(ctx).
-		Select("id", "email", "is_verified").
+		Select("id", "email", "is_verified", "name").
+		Preload("Roles", func(db *gorm.DB) *gorm.DB {
+			return db.Select("id", "name")
+		}).
 		Where("id = ? OR email = ?", req.ID, req.Email).
 		Find(&filteredUsers).Error; err != nil {
 		u.logger.Errorf("[UserRepository-1] UpdateProfile: %v", err)
-		return err
+		return nil, err
 	}
 
 	// Separate query result filtered by id or email
@@ -389,7 +392,7 @@ func (u *userRepository) UpdateProfile(ctx context.Context, req entity.UserEntit
 	if foundByID == nil {
 		err := errors.New(utils.DATA_NOT_FOUND)
 		u.logger.Errorf("[UserRepository-2] UpdateProfile: %v", err)
-		return err
+		return nil, err
 	}
 
 	if foundByEmail != nil {
@@ -398,13 +401,13 @@ func (u *userRepository) UpdateProfile(ctx context.Context, req entity.UserEntit
 			if !foundByEmail.IsVerified {
 				err := errors.New(utils.EMAIL_NOT_VERIFIED)
 				u.logger.Errorf("[UserRepository-3] UpdateProfile: %v", err)
-				return err
+				return nil, err
 			}
 		} else {
 			// Other user's email
 			err := errors.New(utils.EMAIL_ALREADY_EXISTS)
 			u.logger.Errorf("[UserRepository-4] UpdateProfile: %v", err)
-			return err
+			return nil, err
 		}
 	}
 
@@ -421,10 +424,15 @@ func (u *userRepository) UpdateProfile(ctx context.Context, req entity.UserEntit
 
 	if err := db.WithContext(ctx).Updates(&modelUser).Error; err != nil {
 		u.logger.Errorf("[UserRepository-5] UpdateProfile: %v", err)
-		return err
+		return nil, err
 	}
 
-	return nil
+	return &entity.UserEntity{
+		ID:       foundByID.ID,
+		Email:    foundByID.Email,
+		Name:     foundByID.Name,
+		RoleName: foundByID.Roles[0].Name,
+	}, nil
 }
 
 // GetProfileById implements UserRepositoryInterface.
@@ -517,7 +525,7 @@ func (u *userRepository) CreateUserAccount(ctx context.Context, req entity.UserE
 		modelRole model.Role
 	)
 
-	modelRole.ID = req.RoleId
+	modelRole.ID = req.RoleID
 
 	modelUser = model.User{
 		Name:     req.Name,

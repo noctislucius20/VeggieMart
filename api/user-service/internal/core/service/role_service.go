@@ -66,12 +66,16 @@ func (r *roleService) CreateRoleAdmin(ctx context.Context, req entity.RoleEntity
 	var roleId int64
 
 	if err := r.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		role, err := r.repo.CreateRole(txCtx, req)
+		roleIdCreated, err := r.repo.CreateRole(txCtx, req)
 		if err != nil {
 			return err
 		}
 
-		roleId = role
+		if err := r.cacheRole.DeleteRoleCache(ctx, roleIdCreated); err != nil {
+			return err
+		}
+
+		roleId = roleIdCreated
 
 		return nil
 	}); err != nil {
@@ -95,16 +99,14 @@ func (r *roleService) DeleteRoleAdmin(ctx context.Context, id int64) error {
 			return err
 		}
 
+		if err := r.cacheRole.DeleteRoleCache(ctx, id); err != nil {
+			return err
+		}
+
 		return nil
 	}); err != nil {
 		r.logger.Errorf("[RoleService-1] DeleteRoleAdmin: %v", err)
 		return err
-	}
-
-	// redis delete key
-	key := fmt.Sprintf("role:%d", id)
-	if err := r.redisClient.Del(ctx, key).Err(); err != nil {
-		r.logger.Errorf("[RoleService-2] DeleteRoleAdmin: %v", err)
 	}
 
 	return nil
@@ -161,16 +163,14 @@ func (r *roleService) UpdateRoleAdmin(ctx context.Context, req entity.RoleEntity
 			return err
 		}
 
+		if err := r.cacheRole.DeleteRoleCache(ctx, req.ID); err != nil {
+			return err
+		}
+
 		return nil
 	}); err != nil {
 		r.logger.Errorf("[RoleService-1] UpdateRoleAdmin: %v", err)
 		return err
-	}
-
-	// redis delete key
-	key := fmt.Sprintf("role:%d", req.ID)
-	if err := r.redisClient.Del(ctx, key).Err(); err != nil {
-		r.logger.Errorf("[RoleService-2] UpdateRoleAdmin: %v", err)
 	}
 
 	return nil

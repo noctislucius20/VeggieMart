@@ -5,21 +5,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"time"
 	"user-service/internal/adapter/repository"
 	"user-service/internal/core/domain/entity"
 	"user-service/utils"
-	"user-service/utils/conv"
+	"user-service/utils/helper"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/labstack/gommon/log"
 )
 
 type UserCacheInterface interface {
-	SignInByEmail(ctx context.Context, email string) (*entity.UserEntity, error)
-	SignInSuccess(ctx context.Context, token string, userEntity *entity.UserEntity) error
-	VerifyUserByToken(ctx context.Context, token string) (*entity.VerificationTokenEntity, error)
-	VerifyUserSuccess(ctx context.Context, token string, tokenEntity *entity.VerificationTokenEntity) error
+	GetUserByEmail(ctx context.Context, email string) (*entity.UserEntity, error)
+	GetCustomerById(ctx context.Context, id int64) (*entity.UserEntity, error)
+	GetProfileById(ctx context.Context, id int64) (*entity.UserEntity, error)
+	GetDataByToken(ctx context.Context, token string) (*entity.VerificationTokenEntity, error)
+	SetUserSession(ctx context.Context, session entity.SessionEntity) error
+	DeleteUserCache(ctx context.Context, id int64) error
 }
 
 type userCache struct {
@@ -38,114 +41,46 @@ func NewUserCache(redisClient *redis.Client, repoUser repository.UserRepositoryI
 	}
 }
 
-// VerifyUserByToken implements [UserCacheInterface].
-func (u *userCache) VerifyUserByToken(ctx context.Context, token string) (*entity.VerificationTokenEntity, error) {
+// DeleteUserCache implements [UserCacheInterface].
+func (u *userCache) DeleteUserCache(ctx context.Context, id int64) error {
 	var (
-		tokenData entity.VerificationTokenEntity
-		key       = fmt.Sprintf("verifyuser:token:%s", token)
-	)
-
-	// Check redis if data exists.
-	val, err := u.redisClient.Get(ctx, key).Result()
-	if err == nil {
-		// if key exists but value null, return data not found error
-		if val == "null" {
-			err := errors.New(utils.TOKEN_INVALID)
-			u.logger.Errorf("[UserCache-1] VerifyUserByToken: %v", err)
-			return nil, err
+		verifyToken entity.VerificationTokenEntity
+		session     entity.SessionEntity
+		user        entity.UserEntity
+		keys        = []string{
+			fmt.Sprintf("user:id:%d:verifytoken", id),
+			fmt.Sprintf("user:id:%d:session", id),
+			fmt.Sprintf("user:id:%d:email", id),
 		}
-
-		json.Unmarshal([]byte(val), &tokenData)
-
-		return &tokenData, nil
-	}
-
-	tokenEntity, err := u.repoToken.GetDataByToken(ctx, token)
-	if err != nil {
-		if err.Error() == utils.TOKEN_INVALID {
-			if err := u.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
-				u.logger.Errorf("[UserCache-2] VerifyUserByToken: %v", err)
-			}
-		}
-
-		u.logger.Errorf("[UserCache-3] VerifyUserByToken: %v", err)
-		return nil, err
-	}
-
-	tokenData = *tokenEntity
-
-	// Save to redis
-	jsonData, _ := json.Marshal(tokenEntity)
-	if err := u.redisClient.Set(ctx, key, jsonData, 1*time.Minute).Err(); err != nil {
-		u.logger.Errorf("[UserCache-4] VerifyUserByToken: %v", err)
-	}
-
-	return &tokenData, nil
-}
-
-// VerifyUserSuccess implements [UserCacheInterface].
-func (u *userCache) VerifyUserSuccess(ctx context.Context, token string, tokenEntity *entity.VerificationTokenEntity) error {
-	var (
-		key         = fmt.Sprintf("signin:token:%s", token)
-		sessionData = map[string]any{
-			"user_id":    tokenEntity.UserID,
-			"name":       tokenEntity.User.Name,
-			"email":      tokenEntity.User.Email,
-			"logged_in":  true,
-			"created_at": time.Now().String(),
-			"token":      token,
-			"role_name":  tokenEntity.User.RoleName,
+		delKeys = []string{
+			fmt.Sprintf("user:customer:%d", id),
+			fmt.Sprintf("user:profile:%d", id),
 		}
 	)
 
-	sessionDataJson, err := conv.ToJSON(sessionData)
-	if err != nil {
-		u.logger.Errorf("[UserCache-1] VerifyUserSuccess: %v", err)
+	if err := helper.RedisBulkGet(ctx, u.redisClient, keys, &verifyToken, &session, &user); err != nil {
+		u.logger.Errorf("[UserCache-1] DeleteUserCache: %v", err)
 		return err
 	}
 
-	if err := u.redisClient.Set(ctx, key, sessionDataJson, time.Hour*23).Err(); err != nil {
-		u.logger.Errorf("[UserCache-2] VerifyUserSuccess: %v", err)
+	delKeys = helper.AppendKeyIfNotEmpty(delKeys, "user:email:%s", user.Email)
+	delKeys = helper.AppendKeyIfNotEmpty(delKeys, "user:verifytoken:%s", verifyToken.Token)
+	delKeys = helper.AppendKeyIfNotEmpty(delKeys, "user:session:%s", session.Token)
+	delKeys = append(delKeys, keys...)
+
+	if err := u.redisClient.Del(ctx, delKeys...).Err(); err != nil {
+		u.logger.Errorf("[UserCache-2] DeleteUserCache: %v", err)
 		return err
 	}
 
 	return nil
 }
 
-// SignInSuccess implements [UserCacheInterface].
-func (u *userCache) SignInSuccess(ctx context.Context, token string, userEntity *entity.UserEntity) error {
+// GetProfileById implements [UserCacheInterface].
+func (u *userCache) GetProfileById(ctx context.Context, id int64) (*entity.UserEntity, error) {
 	var (
-		key         = fmt.Sprintf("signin:token:%s", token)
-		sessionData = map[string]any{
-			"user_id":    userEntity.ID,
-			"name":       userEntity.Name,
-			"email":      userEntity.Email,
-			"logged_in":  true,
-			"created_at": time.Now().String(),
-			"token":      token,
-			"role_name":  userEntity.RoleName,
-		}
-	)
-
-	sessionDataJson, err := conv.ToJSON(sessionData)
-	if err != nil {
-		u.logger.Errorf("[UserCache-1] SignInSuccess: %v", err)
-		return err
-	}
-
-	if err := u.redisClient.Set(ctx, key, sessionDataJson, time.Hour*23).Err(); err != nil {
-		u.logger.Errorf("[UserCache-2] SignInSuccess: %v", err)
-		return err
-	}
-
-	return nil
-}
-
-// SignInByEmail implements [UserCacheInterface].
-func (u *userCache) SignInByEmail(ctx context.Context, email string) (*entity.UserEntity, error) {
-	var (
-		user entity.UserEntity
-		key  = fmt.Sprintf("signin:email:%s", email)
+		profile entity.UserEntity
+		key     = fmt.Sprintf("user:profile:%d", id)
 	)
 
 	// Check redis if data exists.
@@ -154,7 +89,53 @@ func (u *userCache) SignInByEmail(ctx context.Context, email string) (*entity.Us
 		// if key exists but value null, return data not found error
 		if val == "null" {
 			err := errors.New(utils.DATA_NOT_FOUND)
-			u.logger.Errorf("[UserCache-1] SignInByEmail: %v", err)
+			u.logger.Errorf("[UserCache-1] GetProfileById: %v", err)
+			return nil, err
+		}
+
+		json.Unmarshal([]byte(val), &profile)
+
+		return &profile, nil
+	}
+
+	profileEntity, err := u.repoUser.GetProfileById(ctx, id)
+	if err != nil {
+		if err.Error() == utils.DATA_NOT_FOUND {
+			if err := u.redisClient.Set(ctx, key, "null", 10*time.Minute); err != nil {
+				u.logger.Errorf("[UserCache-2] GetProfileById: %v", err)
+			}
+		}
+
+		u.logger.Errorf("[UserCache-3] GetProfileById: %v", err)
+		return nil, err
+	}
+
+	profile = *profileEntity
+
+	// Save to redis
+	jsonData, _ := json.Marshal(profile)
+	ttl := 10*time.Minute + time.Duration(rand.Intn(120))*time.Second
+	if err := u.redisClient.Set(ctx, key, jsonData, ttl).Err(); err != nil {
+		u.logger.Errorf("[UserCache-4] GetProfileById: %v", err)
+	}
+
+	return &profile, nil
+}
+
+// GetCustomerById implements [UserCacheInterface].
+func (u *userCache) GetCustomerById(ctx context.Context, id int64) (*entity.UserEntity, error) {
+	var (
+		user entity.UserEntity
+		key  = fmt.Sprintf("user:customer:%d", id)
+	)
+
+	// Check redis if data exists.
+	val, err := u.redisClient.Get(ctx, key).Result()
+	if err == nil {
+		// if key exists but value null, return data not found error
+		if val == "null" {
+			err := errors.New(utils.DATA_NOT_FOUND)
+			u.logger.Errorf("[UserCache-1] GetCustomerById: %v", err)
 			return nil, err
 		}
 
@@ -163,15 +144,15 @@ func (u *userCache) SignInByEmail(ctx context.Context, email string) (*entity.Us
 		return &user, nil
 	}
 
-	userEntity, err := u.repoUser.GetUserByEmail(ctx, email)
+	userEntity, err := u.repoUser.GetCustomerById(ctx, id)
 	if err != nil {
 		if err.Error() == utils.DATA_NOT_FOUND {
-			if err := u.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
-				u.logger.Errorf("[UserCache-1] SignInByEmail: %v", err)
+			if err := u.redisClient.Set(ctx, key, "null", 10*time.Minute); err != nil {
+				u.logger.Errorf("[UserCache-2] GetCustomerById: %v", err)
 			}
 		}
 
-		u.logger.Errorf("[UserCache-2] SignInByEmail: %v", err)
+		u.logger.Errorf("[UserCache-3] GetCustomerById: %v", err)
 		return nil, err
 	}
 
@@ -179,8 +160,149 @@ func (u *userCache) SignInByEmail(ctx context.Context, email string) (*entity.Us
 
 	// Save to redis
 	jsonData, _ := json.Marshal(user)
-	if err := u.redisClient.Set(ctx, key, jsonData, 1*time.Minute).Err(); err != nil {
-		u.logger.Errorf("[UserCache-3] SignInByEmail: %v", err)
+	ttl := 10*time.Minute + time.Duration(rand.Intn(120))*time.Second
+	if err := u.redisClient.Set(ctx, key, jsonData, ttl).Err(); err != nil {
+		u.logger.Errorf("[UserCache-4] GetCustomerById: %v", err)
+	}
+
+	return &user, nil
+}
+
+// SetUserSession implements [UserCacheInterface].
+func (u *userCache) SetUserSession(ctx context.Context, session entity.SessionEntity) error {
+	var (
+		key = fmt.Sprintf("user:session:%s", session.Token)
+	)
+
+	sessionDataJson, err := json.Marshal(session)
+	if err != nil {
+		u.logger.Errorf("[UserCache-1] SetUserSession: %v", err)
+		return err
+	}
+
+	ttl := 23*time.Hour + time.Duration(rand.Intn(120))*time.Second
+
+	pipe := u.redisClient.Pipeline()
+
+	if err := pipe.Set(ctx, key, session.UserID, ttl).Err(); err != nil {
+		u.logger.Errorf("[UserCache-2] SetUserSession: %v", err)
+		return err
+	}
+	if err := pipe.Set(ctx, fmt.Sprintf("user:id:%d:session", session.UserID), sessionDataJson, ttl).Err(); err != nil {
+		u.logger.Errorf("[UserCache-3] SetUserSession: %v", err)
+		return err
+	}
+	if _, err = pipe.Exec(ctx); err != nil {
+		u.logger.Errorf("[UserCache-4] SetUserSession: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+// GetDataByToken implements [UserCacheInterface].
+func (u *userCache) GetDataByToken(ctx context.Context, token string) (*entity.VerificationTokenEntity, error) {
+	var (
+		tokenData entity.VerificationTokenEntity
+		key       = fmt.Sprintf("user:verifytoken:%s", token)
+	)
+
+	// Check redis if data exists.
+	if valKey, err := u.redisClient.Get(ctx, key).Result(); err == nil {
+		// if key exists but value null, return data not found error
+		if valKey == "null" {
+			err := errors.New(utils.DATA_NOT_FOUND)
+			u.logger.Errorf("[UserCache-1] GetDataByToken: %v", err)
+
+			return nil, err
+		}
+		if val, err := u.redisClient.Get(ctx, fmt.Sprintf("user:id:%s:verifytoken", valKey)).Result(); err == nil {
+			json.Unmarshal([]byte(val), &tokenData)
+
+			return &tokenData, nil
+		}
+	}
+
+	tokenEntity, err := u.repoToken.GetDataByToken(ctx, token)
+	if err != nil {
+		if err.Error() == utils.TOKEN_INVALID {
+			if err := u.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
+				u.logger.Errorf("[UserCache-2] GetDataByToken: %v", err)
+			}
+		}
+
+		u.logger.Errorf("[UserCache-3] GetDataByToken: %v", err)
+		return nil, err
+	}
+
+	tokenData = *tokenEntity
+
+	// Save to redis
+	jsonData, _ := json.Marshal(tokenData)
+	ttl := 10*time.Minute + time.Duration(rand.Intn(120))*time.Second
+	pipe := u.redisClient.Pipeline()
+	if err := pipe.Set(ctx, key, tokenData.UserID, ttl).Err(); err != nil {
+		u.logger.Errorf("[UserCache-4] GetDataByToken: %v", err)
+	}
+	if err := pipe.Set(ctx, fmt.Sprintf("user:id:%d:verifytoken", tokenData.UserID), jsonData, ttl).Err(); err != nil {
+		u.logger.Errorf("[UserCache-5] GetDataByToken: %v", err)
+	}
+	if _, err = pipe.Exec(ctx); err != nil {
+		u.logger.Errorf("[UserCache-6] GetDataByToken: %v", err)
+	}
+
+	return &tokenData, nil
+}
+
+// GetUserByEmail implements [UserCacheInterface].
+func (u *userCache) GetUserByEmail(ctx context.Context, email string) (*entity.UserEntity, error) {
+	var (
+		user entity.UserEntity
+		key  = fmt.Sprintf("user:email:%s", email)
+	)
+
+	// Check redis if data exists.
+	if valKey, err := u.redisClient.Get(ctx, key).Result(); err == nil {
+		// if key exists but value null, return data not found error
+		if valKey == "null" {
+			err := errors.New(utils.DATA_NOT_FOUND)
+			u.logger.Errorf("[UserCache-1] GetUserByEmail: %v", err)
+
+			return nil, err
+		}
+		if val, err := u.redisClient.Get(ctx, fmt.Sprintf("user:id:%s:email", valKey)).Result(); err == nil {
+			json.Unmarshal([]byte(val), &user)
+
+			return &user, nil
+		}
+	}
+
+	userEntity, err := u.repoUser.GetUserByEmail(ctx, email)
+	if err != nil {
+		if err.Error() == utils.DATA_NOT_FOUND {
+			if err := u.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
+				u.logger.Errorf("[UserCache-2] GetUserByEmail: %v", err)
+			}
+		}
+
+		u.logger.Errorf("[UserCache-3] GetUserByEmail: %v", err)
+		return nil, err
+	}
+
+	user = *userEntity
+
+	// Save to redis
+	jsonData, _ := json.Marshal(user)
+	ttl := 10*time.Minute + time.Duration(rand.Intn(120))*time.Second
+	pipe := u.redisClient.Pipeline()
+	if err := pipe.Set(ctx, key, user.ID, ttl).Err(); err != nil {
+		u.logger.Errorf("[UserCache-4] GetUserByEmail: %v", err)
+	}
+	if err := pipe.Set(ctx, fmt.Sprintf("user:id:%d:email", user.ID), jsonData, ttl).Err(); err != nil {
+		u.logger.Errorf("[UserCache-5] GetUserByEmail: %v", err)
+	}
+	if _, err = pipe.Exec(ctx); err != nil {
+		u.logger.Errorf("[UserCache-6] GetUserByEmail: %v", err)
 	}
 
 	return &user, nil

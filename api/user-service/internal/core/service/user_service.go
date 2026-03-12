@@ -21,7 +21,7 @@ type UserServiceInterface interface {
 	SignIn(ctx context.Context, req entity.UserEntity) (*entity.UserEntity, string, error)
 	CreateUserAccount(ctx context.Context, req entity.UserEntity) (int64, error)
 	ForgotPassword(ctx context.Context, req entity.UserEntity) error
-	VerifyToken(ctx context.Context, token string) (*entity.UserEntity, error)
+	ActivateAccount(ctx context.Context, token string) (*entity.UserEntity, error)
 	UpdatePassword(ctx context.Context, req entity.UserEntity) error
 	GetProfileById(ctx context.Context, userId int64) (*entity.UserEntity, error)
 	UpdateProfile(ctx context.Context, req entity.UserEntity) error
@@ -89,17 +89,15 @@ func (u *userService) DeleteCustomer(ctx context.Context, customerId int64) erro
 			return err
 		}
 
+		if err := u.cacheUser.DeleteUserCache(ctx, customerId); err != nil {
+			return err
+		}
+
 		return nil
 	}); err != nil {
 		u.logger.Errorf("[UserService-1] DeleteCustomer: %v", err)
 		return err
 	}
-
-	// redis delete key
-	// key := fmt.Sprintf("customer:%d", customerId)
-	// if err := u.redisClient.Del(ctx, key).Err(); err != nil {
-	// 	u.logger.Errorf("[UserService-2] DeleteCustomer: %v", err)
-	// }
 
 	return nil
 }
@@ -111,18 +109,20 @@ func (u *userService) UpdateCustomer(ctx context.Context, req entity.UserEntity)
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
 		if req.Password != "" {
 			password = req.Password
+
 			hashedPassword, err := conv.HashPassword(req.Password)
 			if err != nil {
 				return err
 			}
+
 			req.Password = hashedPassword
 		}
 
-		roleEntity, err := u.roleService.GetRoleByNameAdmin(txCtx, "Customer")
+		_, err := u.roleService.GetRoleByIdAdmin(txCtx, req.RoleID)
 		if err != nil {
+			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
 			return err
 		}
-		req.RoleId = roleEntity.ID
 
 		if err := u.repo.UpdateCustomer(txCtx, req); err != nil {
 			return err
@@ -138,9 +138,15 @@ func (u *userService) UpdateCustomer(ctx context.Context, req entity.UserEntity)
 				"receiver_id":       req.ID,
 				"notification_type": "EMAIL",
 			}
+
 			if err := u.repoOutbox.CreateEvent(txCtx, utils.NOTIF_EMAIL_UPDATE_CUSTOMER, publishEmailPayload, &req.ID); err != nil {
 				return err
 			}
+		}
+
+		// delete all user cache
+		if err := u.cacheUser.DeleteUserCache(txCtx, req.ID); err != nil {
+			return err
 		}
 
 		return nil
@@ -148,12 +154,6 @@ func (u *userService) UpdateCustomer(ctx context.Context, req entity.UserEntity)
 		u.logger.Errorf("[UserService-1] UpdateCustomer: %v", err)
 		return err
 	}
-
-	// redis delete key
-	// key := fmt.Sprintf("customer:%d", req.ID)
-	// if err := u.redisClient.Del(ctx, key).Err(); err != nil {
-	// 	u.logger.Errorf("[UserService-2] UpdateCustomer: %v", err)
-	// }
 
 	return nil
 }
@@ -172,11 +172,10 @@ func (u *userService) CreateCustomer(ctx context.Context, req entity.UserEntity)
 
 		req.Password = hashedPassword
 
-		roleEntity, err := u.roleService.GetRoleByNameAdmin(txCtx, "Customer")
-		if err != nil {
+		if _, err := u.roleService.GetRoleByIdAdmin(txCtx, req.RoleID); err != nil {
+			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
 			return err
 		}
-		req.RoleId = roleEntity.ID
 
 		customer, err := u.repo.CreateCustomer(txCtx, req)
 		if err != nil {
@@ -195,7 +194,12 @@ func (u *userService) CreateCustomer(ctx context.Context, req entity.UserEntity)
 			"receiver_id":       customerId,
 			"notification_type": "EMAIL",
 		}
+
 		if err := u.repoOutbox.CreateEvent(txCtx, utils.NOTIF_EMAIL_CREATE_CUSTOMER, publishEmailPayload, &customerId); err != nil {
+			return err
+		}
+
+		if err := u.cacheUser.DeleteUserCache(ctx, customerId); err != nil {
 			return err
 		}
 
@@ -207,12 +211,6 @@ func (u *userService) CreateCustomer(ctx context.Context, req entity.UserEntity)
 		return 0, err
 	}
 
-	// redis delete key
-	// key := fmt.Sprintf("customer:%d", req.ID)
-	// if err := u.redisClient.Del(ctx, key).Err(); err != nil {
-	// 	u.logger.Errorf("[UserService-2] CreateCustomer: %v", err)
-	// }
-
 	return customerId, nil
 }
 
@@ -220,24 +218,10 @@ func (u *userService) CreateCustomer(ctx context.Context, req entity.UserEntity)
 func (u *userService) GetCustomerById(ctx context.Context, customerId int64) (*entity.UserEntity, error) {
 	var (
 		customer entity.UserEntity
-		// key      = fmt.Sprintf("customer:%d", customerId)
 	)
 
-	// Check redis if data exists.
-	// val, err := u.redisClient.Get(ctx, key).Result()
-	// if err == nil {
-	// 	// if key exists but value null, return data not found error
-	// 	if val == "null" {
-	// 		err := errors.New(utils.DATA_NOT_FOUND)
-	// 		return nil, err
-	// 	}
-
-	// 	json.Unmarshal([]byte(val), &customer)
-	// 	return &customer, nil
-	// }
-
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		customerEntity, err := u.repo.GetCustomerById(txCtx, customerId)
+		customerEntity, err := u.cacheUser.GetCustomerById(txCtx, customerId)
 		if err != nil {
 			return err
 		}
@@ -246,22 +230,9 @@ func (u *userService) GetCustomerById(ctx context.Context, customerId int64) (*e
 
 		return nil
 	}); err != nil {
-		// Save to redis (create key with null value if data not found)
-		// if err.Error() == utils.DATA_NOT_FOUND {
-		// 	if err := u.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
-		// 		u.logger.Errorf("[UserService-1] GetCustomerById: %v", err)
-		// 	}
-		// }
-
-		u.logger.Errorf("[UserService-2] GetCustomerById: %v", err)
+		u.logger.Errorf("[UserService-1] GetCustomerById: %v", err)
 		return nil, err
 	}
-
-	// Save to redis
-	// jsonData, _ := json.Marshal(customer)
-	// if err := u.redisClient.Set(ctx, key, jsonData, 1*time.Hour).Err(); err != nil {
-	// 	u.logger.Errorf("[UserService-3] GetCustomerById: %v", err)
-	// }
 
 	return &customer, nil
 }
@@ -294,7 +265,31 @@ func (u *userService) GetCustomersAll(ctx context.Context, query entity.QueryStr
 // UpdateProfile implements UserServiceInterface.
 func (u *userService) UpdateProfile(ctx context.Context, req entity.UserEntity) error {
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		if err := u.repo.UpdateProfile(txCtx, req); err != nil {
+		userEntity, err := u.repo.UpdateProfile(txCtx, req)
+		if err != nil {
+			return err
+		}
+
+		if err := u.cacheUser.DeleteUserCache(txCtx, userEntity.ID); err != nil {
+			return err
+		}
+
+		tokenString, err := u.jwtService.GenerateToken(userEntity.ID)
+		if err != nil {
+			return err
+		}
+
+		session := entity.SessionEntity{
+			UserID:    userEntity.ID,
+			Name:      userEntity.Name,
+			Email:     userEntity.Email,
+			LoggedIn:  true,
+			CreatedAt: time.Now().String(),
+			Token:     tokenString,
+			RoleName:  userEntity.RoleName,
+		}
+
+		if err := u.cacheUser.SetUserSession(txCtx, session); err != nil {
 			return err
 		}
 
@@ -304,12 +299,6 @@ func (u *userService) UpdateProfile(ctx context.Context, req entity.UserEntity) 
 		return err
 	}
 
-	// redis delete key
-	// key := fmt.Sprintf("user:%d", req.ID)
-	// if err := u.redisClient.Del(ctx, key).Err(); err != nil {
-	// 	u.logger.Errorf("[UserService-2] UpdateProfile: %v", err)
-	// }
-
 	return nil
 }
 
@@ -317,24 +306,10 @@ func (u *userService) UpdateProfile(ctx context.Context, req entity.UserEntity) 
 func (u *userService) GetProfileById(ctx context.Context, userId int64) (*entity.UserEntity, error) {
 	var (
 		profile entity.UserEntity
-		// key     = fmt.Sprintf("user:%d", userId)
 	)
 
-	// Check redis if data exists.
-	// val, err := u.redisClient.Get(ctx, key).Result()
-	// if err == nil {
-	// 	// if key exists but value null, return data not found error
-	// 	if val == "null" {
-	// 		err := errors.New(utils.DATA_NOT_FOUND)
-	// 		return nil, err
-	// 	}
-
-	// 	json.Unmarshal([]byte(val), &profile)
-	// 	return &profile, nil
-	// }
-
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		profileEntity, err := u.repo.GetProfileById(txCtx, userId)
+		profileEntity, err := u.cacheUser.GetProfileById(txCtx, userId)
 		if err != nil {
 			return err
 		}
@@ -343,22 +318,9 @@ func (u *userService) GetProfileById(ctx context.Context, userId int64) (*entity
 
 		return nil
 	}); err != nil {
-		// Save to redis (create key with null value if data not found)
-		// if err.Error() == utils.DATA_NOT_FOUND {
-		// 	if err := u.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
-		// 		u.logger.Errorf("[UserService-1] GetProfileById: %v", err)
-		// 	}
-		// }
-
-		u.logger.Errorf("[UserService-2] GetProfileById: %v", err)
+		u.logger.Errorf("[UserService-1] GetProfileById: %v", err)
 		return nil, err
 	}
-
-	// Save to redis
-	// jsonData, _ := json.Marshal(profile)
-	// if err := u.redisClient.Set(ctx, key, jsonData, 1*time.Hour).Err(); err != nil {
-	// 	u.logger.Errorf("[UserService-3] GetProfileById: %v", err)
-	// }
 
 	return &profile, nil
 }
@@ -366,8 +328,13 @@ func (u *userService) GetProfileById(ctx context.Context, userId int64) (*entity
 // UpdatePassword implements UserServiceInterface.
 func (u *userService) UpdatePassword(ctx context.Context, req entity.UserEntity) error {
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		tokenEntity, err := u.repoToken.GetDataByToken(txCtx, req.Token)
+		tokenEntity, err := u.cacheUser.GetDataByToken(txCtx, req.Token)
 		if err != nil {
+			return err
+		}
+
+		if tokenEntity.TokenType != utils.NOTIF_EMAIL_FORGOT_PASSWORD {
+			err := errors.New(utils.TOKEN_INVALID)
 			return err
 		}
 
@@ -376,11 +343,7 @@ func (u *userService) UpdatePassword(ctx context.Context, req entity.UserEntity)
 			if err := u.repoToken.DeleteVerificationToken(txCtx, tokenEntity.ID); err != nil {
 				return err
 			}
-			return err
-		}
 
-		if tokenEntity.TokenType != utils.NOTIF_EMAIL_FORGOT_PASSWORD {
-			err := errors.New(utils.TOKEN_INVALID)
 			return err
 		}
 
@@ -400,6 +363,10 @@ func (u *userService) UpdatePassword(ctx context.Context, req entity.UserEntity)
 			return err
 		}
 
+		if err := u.cacheUser.DeleteUserCache(ctx, req.ID); err != nil {
+			return err
+		}
+
 		return nil
 	}); err != nil {
 		u.logger.Errorf("[UserService-1] UpdatePassword: %v", err)
@@ -409,12 +376,15 @@ func (u *userService) UpdatePassword(ctx context.Context, req entity.UserEntity)
 	return nil
 }
 
-// VerifyToken implements UserServiceInterface.
-func (u *userService) VerifyToken(ctx context.Context, token string) (*entity.UserEntity, error) {
-	var user *entity.UserEntity
+// ActivateAccount implements UserServiceInterface.
+func (u *userService) ActivateAccount(ctx context.Context, token string) (*entity.UserEntity, error) {
+	var (
+		user    *entity.UserEntity
+		session entity.SessionEntity
+	)
 
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		tokenEntity, err := u.cacheUser.VerifyUserByToken(txCtx, token)
+		tokenEntity, err := u.cacheUser.GetDataByToken(txCtx, token)
 		if err != nil {
 			return err
 		}
@@ -440,12 +410,26 @@ func (u *userService) VerifyToken(ctx context.Context, token string) (*entity.Us
 			return err
 		}
 
+		if err := u.cacheUser.DeleteUserCache(ctx, tokenEntity.UserID); err != nil {
+			return err
+		}
+
 		accessToken, err := u.jwtService.GenerateToken(tokenEntity.UserID)
 		if err != nil {
 			return err
 		}
 
-		if err := u.cacheUser.VerifyUserSuccess(txCtx, accessToken, tokenEntity); err != nil {
+		session = entity.SessionEntity{
+			UserID:    tokenEntity.UserID,
+			Name:      tokenEntity.User.Name,
+			Email:     tokenEntity.User.Email,
+			LoggedIn:  true,
+			CreatedAt: time.Now().String(),
+			Token:     accessToken,
+			RoleName:  tokenEntity.User.RoleName,
+		}
+
+		if err := u.cacheUser.SetUserSession(txCtx, session); err != nil {
 			return err
 		}
 
@@ -455,18 +439,17 @@ func (u *userService) VerifyToken(ctx context.Context, token string) (*entity.Us
 
 		return nil
 	}); err != nil {
-		u.logger.Errorf("[UserService-1] VerifyToken: %v", err)
+		u.logger.Errorf("[UserService-1] ActivateAccount: %v", err)
 		return nil, err
 	}
 
 	return user, nil
-
 }
 
 // ForgotPassword implements UserServiceInterface.
 func (u *userService) ForgotPassword(ctx context.Context, req entity.UserEntity) error {
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		user, err := u.repo.GetUserByEmail(txCtx, req.Email)
+		user, err := u.cacheUser.GetUserByEmail(txCtx, req.Email)
 		if err != nil {
 			return err
 		}
@@ -527,7 +510,7 @@ func (u *userService) CreateUserAccount(ctx context.Context, req entity.UserEnti
 
 		req.Password = password
 		req.Token = uuid.New().String()
-		req.RoleId = roleEntity.ID
+		req.RoleID = roleEntity.ID
 
 		userIdCreated, err := u.repo.CreateUserAccount(txCtx, req)
 		if err != nil {
@@ -545,6 +528,7 @@ func (u *userService) CreateUserAccount(ctx context.Context, req entity.UserEnti
 		}
 
 		urlVerify := fmt.Sprintf("%s/verify?token=%s", u.cfg.App.UrlUsersService, req.Token)
+
 		payloadMessage := fmt.Sprintf("Please click link below to activate your account: %v", urlVerify)
 
 		publishEmailPayload := map[string]any{
@@ -554,7 +538,12 @@ func (u *userService) CreateUserAccount(ctx context.Context, req entity.UserEnti
 			"receiver_id":       userIdCreated,
 			"notification_type": "EMAIL",
 		}
+
 		if err := u.repoOutbox.CreateEvent(txCtx, utils.NOTIF_EMAIL_VERIFICATION, publishEmailPayload, &userIdCreated); err != nil {
+			return err
+		}
+
+		if err := u.cacheUser.DeleteUserCache(ctx, userIdCreated); err != nil {
 			return err
 		}
 
@@ -572,12 +561,13 @@ func (u *userService) CreateUserAccount(ctx context.Context, req entity.UserEnti
 // SignIn implements UserServiceInterface.
 func (u *userService) SignIn(ctx context.Context, req entity.UserEntity) (*entity.UserEntity, string, error) {
 	var (
-		user  *entity.UserEntity
-		token string
+		user    *entity.UserEntity
+		session entity.SessionEntity
+		token   string
 	)
 
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		userEntity, err := u.cacheUser.SignInByEmail(txCtx, req.Email)
+		userEntity, err := u.cacheUser.GetUserByEmail(txCtx, req.Email)
 		if err != nil {
 			return err
 		}
@@ -597,7 +587,17 @@ func (u *userService) SignIn(ctx context.Context, req entity.UserEntity) (*entit
 			return err
 		}
 
-		if err := u.cacheUser.SignInSuccess(txCtx, tokenString, userEntity); err != nil {
+		session = entity.SessionEntity{
+			UserID:    userEntity.ID,
+			Name:      userEntity.Name,
+			Email:     userEntity.Email,
+			LoggedIn:  true,
+			CreatedAt: time.Now().String(),
+			Token:     tokenString,
+			RoleName:  userEntity.RoleName,
+		}
+
+		if err := u.cacheUser.SetUserSession(txCtx, session); err != nil {
 			return err
 		}
 

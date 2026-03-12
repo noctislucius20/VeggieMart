@@ -25,7 +25,7 @@ type UserHandlerInterface interface {
 	SignIn(c echo.Context) error
 	CreateUserAccount(c echo.Context) error
 	ForgotPassword(c echo.Context) error
-	VerifyAccount(c echo.Context) error
+	ActivateAccount(c echo.Context) error
 	UpdatePassword(c echo.Context) error
 	GetProfileById(c echo.Context) error
 	UpdateProfile(c echo.Context) error
@@ -57,7 +57,7 @@ func NewUserHandler(e *echo.Echo, userService service.UserServiceInterface, cfg 
 	userGroup.POST("/signin", userHandler.SignIn)
 	userGroup.POST("/signup", userHandler.CreateUserAccount)
 	userGroup.POST("/forgot-password", userHandler.ForgotPassword)
-	userGroup.GET("/verify-account", userHandler.VerifyAccount)
+	userGroup.GET("/activate-account", userHandler.ActivateAccount)
 	userGroup.PUT("/reset-password", userHandler.UpdatePassword)
 
 	adminGroup := e.Group("/admin", mid.CheckToken())
@@ -208,7 +208,7 @@ func (u *userHandler) UpdateCustomerAdmin(c echo.Context) error {
 		Lat:      latString,
 		Lng:      lngString,
 		Photo:    req.Photo,
-		RoleId:   req.RoleId,
+		RoleID:   req.RoleID,
 	}
 
 	if err := u.userService.UpdateCustomer(ctx, reqEntity); err != nil {
@@ -256,7 +256,7 @@ func (u *userHandler) CreateCustomerAdmin(c echo.Context) error {
 		Name:     req.Name,
 		Email:    req.Email,
 		Password: req.Password,
-		RoleId:   req.RoleId,
+		RoleID:   req.RoleID,
 		Address:  req.Address,
 		Lat:      latString,
 		Lng:      lngString,
@@ -324,7 +324,7 @@ func (u *userHandler) GetCustomerByIdAdmin(c echo.Context) error {
 		ID:      result.ID,
 		Name:    result.Name,
 		Email:   result.Email,
-		RoleId:  result.RoleId,
+		RoleID:  result.RoleID,
 		Phone:   result.Phone,
 		Lat:     result.Lat,
 		Lng:     result.Lng,
@@ -566,8 +566,8 @@ func (u *userHandler) UpdatePassword(c echo.Context) error {
 	return c.JSON(http.StatusOK, response.ResponseSuccess(nil))
 }
 
-// VerifyAccount implements UserHandlerInterface.
-func (u *userHandler) VerifyAccount(c echo.Context) error {
+// ActivateAccount implements UserHandlerInterface.
+func (u *userHandler) ActivateAccount(c echo.Context) error {
 	var (
 		respSignIn = response.SignInResponse{}
 		ctx        = c.Request().Context()
@@ -575,13 +575,13 @@ func (u *userHandler) VerifyAccount(c echo.Context) error {
 
 	tokenString := c.QueryParam("token")
 	if tokenString == "" {
-		c.Logger().Errorf("[UserHandler-1] VerifyAccount: %v", "missing or invalid token")
+		c.Logger().Errorf("[UserHandler-1] ActivateAccount: %v", "missing or invalid token")
 		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
 	}
 
-	user, err := u.userService.VerifyToken(ctx, tokenString)
+	user, err := u.userService.ActivateAccount(ctx, tokenString)
 	if err != nil {
-		c.Logger().Errorf("[UserHandler-2] VerifyAccount: %v", err)
+		c.Logger().Errorf("[UserHandler-2] ActivateAccount: %v", err)
 		switch err.Error() {
 		case utils.DATA_NOT_FOUND:
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
@@ -718,8 +718,10 @@ func (u *userHandler) SignIn(c echo.Context) error {
 		switch err.Error() {
 		case utils.DATA_NOT_FOUND:
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
+		case utils.LOGIN_INVALID:
+			return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 		case utils.EMAIL_NOT_VERIFIED:
-			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
+			return c.JSON(http.StatusConflict, response.ResponseFailed(err.Error()))
 		default:
 			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 		}

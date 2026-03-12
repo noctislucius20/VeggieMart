@@ -10,5 +10,5 @@ type CustomerRequest struct {
 	Lat                  float64 `json:"lat"`
 	Lng                  float64 `json:"lng"`
 	Photo                string  `json:"photo"`
-	RoleId               int64   `json:"role_id" validate:"required"`
+	RoleID               int64   `json:"role_id" validate:"required"`
 }

@@ -91,6 +91,7 @@ func (v *verificationTokenRepository) GetDataByToken(ctx context.Context, token 
 	return &entity.VerificationTokenEntity{
 		ID:        tokenDTO.ID,
 		UserID:    tokenDTO.UserID,
+		Token:     token,
 		TokenType: tokenDTO.TokenType,
 		ExpiresAt: tokenDTO.ExpiresAt,
 		User: entity.UserEntity{

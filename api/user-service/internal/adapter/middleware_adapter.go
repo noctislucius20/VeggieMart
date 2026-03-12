@@ -48,8 +48,8 @@ func (m *middlewareAdapter) CheckToken() echo.MiddlewareFunc {
 				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 			}
 
-			key := fmt.Sprintf("signin:token:%s", tokenString)
-			getSession, err := m.redisClient.Get(c.Request().Context(), key).Result()
+			keyIdxSession := fmt.Sprintf("user:session:%s", tokenString)
+			getIdxSession, err := m.redisClient.Get(c.Request().Context(), keyIdxSession).Result()
 			if err != nil {
 				m.logger.Errorf("[MiddlewareAdapter-3] CheckToken: %v", err.Error())
 				if errors.Is(err, redis.Nil) {
@@ -59,12 +59,19 @@ func (m *middlewareAdapter) CheckToken() echo.MiddlewareFunc {
 				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 			}
 
+			keySession := fmt.Sprintf("user:id:%s:session", getIdxSession)
+			getSession, err := m.redisClient.Get(c.Request().Context(), keySession).Result()
+			if err != nil {
+				m.logger.Errorf("[MiddlewareAdapter-4] CheckToken: %v", err.Error())
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			}
+
 			c.Set("user", getSession)
 
 			jwtUserData := entity.JwtUserData{}
 			err = json.Unmarshal([]byte(getSession), &jwtUserData)
 			if err != nil {
-				m.logger.Errorf("[MiddlewareAdapter-4] CheckToken: %v", err.Error())
+				m.logger.Errorf("[MiddlewareAdapter-5] CheckToken: %v", err.Error())
 				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
 			}
 
@@ -73,7 +80,7 @@ func (m *middlewareAdapter) CheckToken() echo.MiddlewareFunc {
 
 			if strings.ToLower(jwtUserData.RoleName) == "Customer" && segments[0] == "admin" {
 				err := errors.New(utils.ACCESS_FORBIDDEN)
-				m.logger.Errorf("[MiddlewareAdapter-5] CheckToken: %v", err.Error())
+				m.logger.Errorf("[MiddlewareAdapter-6] CheckToken: %v", err.Error())
 				return c.JSON(http.StatusForbidden, response.ResponseFailed(err.Error()))
 			}
 

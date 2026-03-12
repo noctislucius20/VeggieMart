@@ -25,7 +25,7 @@ type ProfileResponse struct {
 
 type CustomerResponse struct {
 	RoleName string `json:"role,omitempty"`
-	RoleId   int64  `json:"role_id"`
+	RoleID   int64  `json:"role_id"`
 	ID       int64  `json:"id"`
 	Name     string `json:"name"`
 	Email    string `json:"email"`
