@@ -98,18 +98,18 @@ func (p *productRepository) SearchProducts(ctx context.Context, query entity.Que
 	offset := (query.Page - 1) * query.Limit
 
 	categoryFilter := ""
-	if query.CategorySlug != "" {
-		categoryFilter = fmt.Sprintf(`{ "match": { "CategorySlug": "%s" } },`, query.CategorySlug)
+	if query.CategoryID != 0 {
+		categoryFilter = fmt.Sprintf(`{ "match": { "category_id": "%d" } },`, query.CategoryID)
 	}
 
 	priceFilter := ""
 	if query.StartPrice > 0 && query.EndPrice > 0 {
-		priceFilter = fmt.Sprintf(`{ "range": { "RegularPrice": { "gte": %d, "lte": %d } } }`, query.StartPrice, query.EndPrice)
+		priceFilter = fmt.Sprintf(`{ "range": { "regular_price": { "gte": %d, "lte": %d } } }`, query.StartPrice, query.EndPrice)
 	}
 
 	searchFilter := `{ "match_all": {} }`
 	if query.Search != "" {
-		searchFilter = fmt.Sprintf(`{ "multi_match": { "query": "%s", "fields": ["Name", "Description", "CategoryName"] } }`, query.Search)
+		searchFilter = fmt.Sprintf(`{ "multi_match": { "query": "%s", "fields": ["name", "description"] } }`, query.Search)
 	}
 
 	mainQuery := fmt.Sprintf(`{
@@ -127,7 +127,7 @@ func (p *productRepository) SearchProducts(ctx context.Context, query entity.Que
 			}
 		},
 		"sort": [
-			{ "ID": "asc" }
+			{ "id": "asc" }
 		]
 	}`, offset, query.Limit, categoryFilter, searchFilter, priceFilter)
 
@@ -143,9 +143,15 @@ func (p *productRepository) SearchProducts(ctx context.Context, query entity.Que
 	}
 	defer res.Body.Close()
 
+	if res.StatusCode != 200 {
+		err := errors.New(res.Status())
+		p.logger.Errorf("[ProductRepository-2] SearchProducts: %v", err)
+		return nil, 0, 0, err
+	}
+
 	var result map[string]any
 	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
-		p.logger.Errorf("[ProductRepository-2] SearchProducts: %v", err)
+		p.logger.Errorf("[ProductRepository-3] SearchProducts: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -205,7 +211,6 @@ func (p *productRepository) UpdateProduct(ctx context.Context, req entity.Produc
 	var (
 		db           = p.getDB(ctx)
 		modelProduct = &model.Product{
-			ID:           req.ID,
 			CategoryID:   req.CategoryID,
 			Name:         req.Name,
 			Image:        req.Image,
@@ -220,7 +225,9 @@ func (p *productRepository) UpdateProduct(ctx context.Context, req entity.Produc
 		}
 	)
 
-	tx := db.WithContext(ctx).Updates(&modelProduct)
+	tx := db.WithContext(ctx).
+		Where("id = ? AND parent_id IS NULL", req.ID).
+		Updates(&modelProduct)
 	if tx.Error != nil {
 		p.logger.Errorf("[ProductRepository-1] UpdateProduct: %v", tx.Error)
 		return tx.Error
@@ -235,7 +242,7 @@ func (p *productRepository) UpdateProduct(ctx context.Context, req entity.Produc
 	modelProductChild := []model.Product{}
 	if len(req.Childs) > 0 {
 		if err := db.WithContext(ctx).
-			Where("parent_id = ?", modelProduct.ID).
+			Where("parent_id = ?", req.ID).
 			Delete(&model.Product{}).Error; err != nil {
 			p.logger.Errorf("[ProductRepository-3] UpdateProduct: %v", err)
 			return err
@@ -244,7 +251,7 @@ func (p *productRepository) UpdateProduct(ctx context.Context, req entity.Produc
 		for _, val := range req.Childs {
 			modelProductChild = append(modelProductChild, model.Product{
 				CategoryID:   req.CategoryID,
-				ParentID:     &modelProduct.ID,
+				ParentID:     &req.ID,
 				Name:         req.Name,
 				Image:        val.Image,
 				Description:  req.Description,
@@ -353,14 +360,17 @@ func (p *productRepository) GetProductById(ctx context.Context, productId int64)
 		productEntity *entity.ProductEntity
 	)
 
-	if err := db.WithContext(ctx).
+	if err := db.WithContext(ctx).Debug().
+		Order("id ASC").
 		Omit("updated_at", "deleted_at").
-		Preload("Categories", func(db *gorm.DB) *gorm.DB {
-			return db.WithContext(ctx).
-				Select("id", "name", "slug")
-		}).
-		Find(&modelProducts, "id = ? OR parent_id", productId, productId).Error; err != nil {
+		Find(&modelProducts, "id = ? OR parent_id = ?", productId, productId).Error; err != nil {
 		p.logger.Errorf("[ProductRepository-1] GetProductById: %v", err)
+		return nil, err
+	}
+
+	if len(modelProducts) == 0 || (len(modelProducts) > 0 && modelProducts[0].ParentID != nil) {
+		err := errors.New(utils.DATA_NOT_FOUND)
+		p.logger.Errorf("[ProductRepository-2] GetProductById: %v", err)
 		return nil, err
 	}
 
@@ -368,7 +378,6 @@ func (p *productRepository) GetProductById(ctx context.Context, productId int64)
 		if val.ParentID == nil {
 			productEntity = &entity.ProductEntity{
 				ID:           val.ID,
-				CategorySlug: val.Categories.Slug,
 				Name:         val.Name,
 				Image:        val.Image,
 				Description:  val.Description,
@@ -380,14 +389,13 @@ func (p *productRepository) GetProductById(ctx context.Context, productId int64)
 				Variant:      val.Variant,
 				Status:       val.Status,
 				CreatedAt:    val.CreatedAt,
-				CategoryName: val.Categories.Name,
+				CategoryID:   val.CategoryID,
 			}
 			continue
 		}
 
 		productEntity.Childs = append(productEntity.Childs, entity.ProductEntity{
 			ID:           val.ID,
-			CategorySlug: val.Categories.Slug,
 			ParentID:     val.ParentID,
 			Name:         val.Name,
 			Image:        val.Image,
@@ -399,10 +407,8 @@ func (p *productRepository) GetProductById(ctx context.Context, productId int64)
 			Stock:        val.Stock,
 			Variant:      val.Variant,
 			Status:       val.Status,
-			CategoryName: val.Categories.Name,
 			CreatedAt:    val.CreatedAt,
 		})
-
 	}
 
 	return productEntity, nil
@@ -411,39 +417,42 @@ func (p *productRepository) GetProductById(ctx context.Context, productId int64)
 // GetAllProducts implements ProductRepositoryInterface.
 func (p *productRepository) GetAllProducts(ctx context.Context, query entity.QueryStringProduct) ([]entity.ProductEntity, int64, int64, error) {
 	var (
-		db            = p.getDB(ctx)
-		modelProducts []model.Product
-		countData     int64
+		db          = p.getDB(ctx)
+		productsDto []model.ProductDTO
+		countData   int64
 	)
 
-	orderSort := fmt.Sprintf("%s %s", query.OrderBy, query.OrderType)
+	orderSort := fmt.Sprintf("products.%s %s", query.OrderBy, query.OrderType)
 	offset := (query.Page - 1) * query.Limit
 
-	productSelectedField := `products.id AS id,
-							products.parent_id AS parent_id,
-							products.name AS name,
-							products.image AS image,
-							products.description AS description,
-							products.regular_price AS regular_price,
-							products.sale_price AS sale_price,
-							products.unit AS unit,
-							products.weight AS weight,
-							products.stock AS stock,
-							products.variant AS variant,
-							products.status AS status,
-							products.created_at AS created_at`
+	productSelectedField := `products.id AS product_id,
+							products.parent_id AS product_parent_id,
+							products.name AS product_name,
+							products.image AS product_image,
+							products.description AS product_description,
+							products.regular_price AS product_regular_price,
+							products.sale_price AS product_sale_price,
+							products.unit AS product_unit,
+							products.weight AS product_weight,
+							products.stock AS product_stock,
+							products.variant AS product_variant,
+							products.status AS product_status,
+							products.created_at AS product_created_at,
+							categories.name AS category_name`
 
-	sqlMain := db.WithContext(ctx).Select(productSelectedField).Joins("Categories").
-		Preload("Categories").
+	sqlMain := db.WithContext(ctx).
+		Model(&model.Product{}).
+		Select(productSelectedField).
+		Joins("LEFT JOIN categories ON categories.id = products.category_id").
 		Where("products.parent_id IS NULL").
 		Where("products.status = ?", "active")
 
 	if query.Search != "" {
-		sqlMain = sqlMain.Where(`products.name ILIKE ? OR products.description ILIKE ? OR "Categories".slug ILIKE ?`, "%"+query.Search+"%", "%"+query.Search+"%", "%"+query.Search+"%")
+		sqlMain = sqlMain.Where(`products.name ILIKE ? OR products.description ILIKE ?`, "%"+query.Search+"%", "%"+query.Search+"%")
 	}
 
-	if query.CategorySlug != "" {
-		sqlMain = sqlMain.Where(`"Categories".slug = ?`, query.CategorySlug)
+	if query.CategoryID != 0 {
+		sqlMain = sqlMain.Where("categories.id = ?", query.CategoryID)
 	}
 
 	if query.StartPrice > 0 {
@@ -454,35 +463,34 @@ func (p *productRepository) GetAllProducts(ctx context.Context, query entity.Que
 		sqlMain = sqlMain.Where("products.sale_price <= ?", query.EndPrice)
 	}
 
-	if err := sqlMain.Model(&modelProducts).Count(&countData).Error; err != nil {
+	if err := sqlMain.Count(&countData).Error; err != nil {
 		p.logger.Errorf("[ProductRepository-1] GetAllProducts: %v", err)
 		return nil, 0, 0, err
 	}
 
 	totalPage := int(math.Ceil(float64(countData) / float64(query.Limit)))
-	if err := sqlMain.Order(orderSort).Limit(int(query.Limit)).Offset(int(offset)).Find(&modelProducts).Error; err != nil {
+	if err := sqlMain.Order(orderSort).Limit(int(query.Limit)).Offset(int(offset)).Find(&productsDto).Error; err != nil {
 		p.logger.Errorf("[ProductRepository-2] GetAllProducts: %v", err)
 		return nil, 0, 0, err
 	}
 
 	entities := []entity.ProductEntity{}
-	for _, val := range modelProducts {
+	for _, val := range productsDto {
 		entities = append(entities, entity.ProductEntity{
-			ID:           val.ID,
-			CategorySlug: val.Categories.Slug,
-			ParentID:     val.ParentID,
-			Name:         val.Name,
-			Image:        val.Image,
-			Description:  val.Description,
-			RegularPrice: val.RegularPrice,
-			SalePrice:    val.SalePrice,
-			Unit:         val.Unit,
-			Weight:       val.Weight,
-			Stock:        val.Stock,
-			Variant:      val.Variant,
-			Status:       val.Status,
-			CategoryName: val.Categories.Name,
-			CreatedAt:    val.CreatedAt,
+			ID:           val.ProductID,
+			ParentID:     &val.ProductParentID,
+			Name:         val.ProductName,
+			Image:        val.ProductImage,
+			Description:  val.ProductDescription,
+			RegularPrice: val.ProductRegularPrice,
+			SalePrice:    val.ProductSalePrice,
+			Unit:         val.ProductUnit,
+			Weight:       val.ProductWeight,
+			Stock:        val.ProductStock,
+			Variant:      val.ProductVariant,
+			Status:       val.ProductStatus,
+			CategoryName: val.CategoryName,
+			CreatedAt:    val.ProductCreatedAt,
 		})
 	}
 

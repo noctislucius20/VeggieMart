@@ -7,6 +7,7 @@ import (
 	"product-service/config"
 	"product-service/internal/adapter/handler"
 	"product-service/internal/adapter/repository"
+	"product-service/internal/adapter/repository/cache"
 	"product-service/internal/adapter/storage"
 	"product-service/internal/core/service"
 	"product-service/utils/logger"
@@ -67,9 +68,12 @@ func RunServer() {
 	productRepo := repository.NewProductRepository(db.DB, esClient, customLogger.Logger())
 	outboxEventRepo := repository.NewOutboxEventRepository(db.DB, customLogger.Logger())
 
+	cacheCategory := cache.NewCategoryCache(redisClient, categoryRepo, customLogger.Logger())
+	cacheProduct := cache.NewProductCache(redisClient, productRepo, customLogger.Logger())
+
 	jwtService := service.NewJwtService(cfg)
-	categoryService := service.NewCategoryService(categoryRepo, redisClient, txManager, customLogger.Logger())
-	productService := service.NewProductService(cfg, productRepo, redisClient, txManager, categoryService, outboxEventRepo, customLogger.Logger())
+	categoryService := service.NewCategoryService(categoryRepo, redisClient, cacheCategory, txManager, customLogger.Logger())
+	productService := service.NewProductService(cfg, productRepo, redisClient, cacheProduct, txManager, categoryService, outboxEventRepo, customLogger.Logger())
 
 	handler.NewCategoryHandler(e, categoryService, cfg, jwtService, redisClient)
 	handler.NewProductHandler(e, cfg, productService, jwtService, redisClient)

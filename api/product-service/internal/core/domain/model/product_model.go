@@ -26,3 +26,20 @@ type Product struct {
 	Childs       []Product       `gorm:"foreignkey:ParentID"`
 	Categories   Category        `gorm:"constraint:OnDelete:CASCADE;foreignkey:CategoryID"`
 }
+
+type ProductDTO struct {
+	ProductID           int64
+	ProductParentID     int64
+	ProductName         string
+	ProductImage        string
+	ProductDescription  string
+	ProductRegularPrice float64
+	ProductSalePrice    float64
+	ProductUnit         string
+	ProductWeight       int64
+	ProductStock        int64
+	ProductVariant      int64
+	ProductStatus       string
+	ProductCreatedAt    time.Time
+	CategoryName        string
+}

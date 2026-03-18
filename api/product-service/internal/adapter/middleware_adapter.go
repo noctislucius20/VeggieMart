@@ -3,6 +3,7 @@ package adapter
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"product-service/config"
 	"product-service/internal/adapter/handler/response"
@@ -47,13 +48,20 @@ func (m *middlewareAdapter) CheckToken() echo.MiddlewareFunc {
 				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 			}
 
-			getSession, err := m.redisClient.Get(c.Request().Context(), tokenString).Result()
+			keyIdxSession := fmt.Sprintf("user:session:%s", tokenString)
+			getIdxSession, err := m.redisClient.Get(c.Request().Context(), keyIdxSession).Result()
 			if err != nil {
+				m.logger.Errorf("[MiddlewareAdapter-3] CheckToken: %v", err.Error())
 				if errors.Is(err, redis.Nil) {
 					err := errors.New(utils.TOKEN_INVALID)
-					m.logger.Errorf("[MiddlewareAdapter-3] CheckToken: %v", err.Error())
 					return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 				}
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			}
+
+			keySession := fmt.Sprintf("user:id:%s:session", getIdxSession)
+			getSession, err := m.redisClient.Get(c.Request().Context(), keySession).Result()
+			if err != nil {
 				m.logger.Errorf("[MiddlewareAdapter-4] CheckToken: %v", err.Error())
 				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 			}

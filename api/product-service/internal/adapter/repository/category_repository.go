@@ -16,10 +16,11 @@ import (
 
 type CategoryRepositoryInterface interface {
 	GetAllCategories(ctx context.Context, query entity.QueryStringEntity) ([]entity.CategoryEntity, int64, int64, error)
+	GetBatchCategories(ctx context.Context, categoryIds []int64) ([]entity.CategoryEntity, error)
 	GetCategoryByIdOrSlug(ctx context.Context, id int64, slug string) (*entity.CategoryEntity, error)
 	CreateCategory(ctx context.Context, req entity.CategoryEntity) (int64, error)
-	UpdateCategory(ctx context.Context, req entity.CategoryEntity) (string, error)
-	DeleteCategory(ctx context.Context, categoryId int64) (string, error)
+	UpdateCategory(ctx context.Context, req entity.CategoryEntity) error
+	DeleteCategory(ctx context.Context, categoryId int64) error
 
 	GetAllPublishedCategories(ctx context.Context) ([]entity.CategoryEntity, error)
 
@@ -42,6 +43,48 @@ func (c *categoryRepository) getDB(ctx context.Context) *gorm.DB {
 	}
 
 	return c.db
+}
+
+// GetBatchCategories implements [CategoryRepositoryInterface].
+func (c *categoryRepository) GetBatchCategories(ctx context.Context, categoryIds []int64) ([]entity.CategoryEntity, error) {
+	var (
+		db              = c.getDB(ctx)
+		modelCategories []model.Category
+	)
+
+	chunkSize := 150
+
+	for i := 0; i < len(categoryIds); i += chunkSize {
+		end := min(i+chunkSize, len(categoryIds))
+
+		batchCategories := []model.Category{}
+		if err := db.WithContext(ctx).
+			Select("id", "name", "slug").
+			Where("id IN ?", categoryIds[i:end]).
+			Find(&batchCategories).Error; err != nil {
+			c.logger.Errorf("[CategoryRepository-1] GetBatchCategories: %v", err)
+			return nil, err
+		}
+
+		modelCategories = append(modelCategories, batchCategories...)
+	}
+
+	if len(modelCategories) == 0 {
+		err := errors.New(utils.DATA_NOT_FOUND)
+		c.logger.Errorf("[CategoryRepository-2] GetBatchCategories: %v", err)
+		return nil, err
+	}
+
+	entities := []entity.CategoryEntity{}
+	for _, val := range modelCategories {
+		entities = append(entities, entity.CategoryEntity{
+			ID:   val.ID,
+			Name: val.Name,
+			Slug: val.Slug,
+		})
+	}
+
+	return entities, nil
 }
 
 // GetAllPublishedCategories implements [CategoryRepositoryInterface].
@@ -75,7 +118,7 @@ func (c *categoryRepository) GetAllPublishedCategories(ctx context.Context) ([]e
 }
 
 // DeleteCategory implements CategoryRepositoryInterface.
-func (c *categoryRepository) DeleteCategory(ctx context.Context, categoryId int64) (string, error) {
+func (c *categoryRepository) DeleteCategory(ctx context.Context, categoryId int64) error {
 	var (
 		db            = c.getDB(ctx)
 		modelCategory = model.Category{
@@ -85,76 +128,65 @@ func (c *categoryRepository) DeleteCategory(ctx context.Context, categoryId int6
 	)
 
 	if err := db.WithContext(ctx).
+		Model(&model.Category{}).
 		Select("categories.id AS category_id",
 			"products.id AS product_id",
-			"categories.slug AS slug",
 		).
-		Joins("JOIN products ON categories.id = products.category_id").
+		Joins("LEFT JOIN products ON categories.id = products.category_id").
 		Where("categories.id = ?", categoryId).
-		First(&categoryDeleteDTO).Error; err != nil {
+		Where("products.deleted_at IS NULL").
+		Find(&categoryDeleteDTO).
+		Limit(1).Error; err != nil {
 		c.logger.Errorf("[CategoryRepository-1] DeleteCategory: %v", err)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err := errors.New(utils.DATA_NOT_FOUND)
-			return "", err
-		}
-		return "", err
+		return err
 	}
 
 	if categoryDeleteDTO.ProductID > 0 {
 		err := errors.New(utils.DATA_STILL_IN_USED)
 		c.logger.Errorf("[CategoryRepository-2] DeleteCategory: %v", err)
-		return "", err
+		return err
 	}
 
 	if err := db.WithContext(ctx).Delete(&modelCategory).Error; err != nil {
 		c.logger.Errorf("[CategoryRepository-3] DeleteCategory: %v", err)
-		return "", err
+		return err
 	}
 
-	return categoryDeleteDTO.Slug, nil
+	return nil
 }
 
 // UpdateCategory implements CategoryRepositoryInterface.
-func (c *categoryRepository) UpdateCategory(ctx context.Context, req entity.CategoryEntity) (string, error) {
+func (c *categoryRepository) UpdateCategory(ctx context.Context, req entity.CategoryEntity) error {
 	var (
-		db                = c.getDB(ctx)
-		modelCategory     model.Category
-		categoryUpdateDTO model.CategoryDTO
-	)
-
-	if err := db.WithContext(ctx).
-		Select("id AS category_id", "slug").
-		Where("id = ?", req.ID).
-		First(&categoryUpdateDTO).Error; err != nil {
-		c.logger.Errorf("[CategoryRepository-1] UpdateCategory: %v", err)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err := errors.New(utils.DATA_NOT_FOUND)
-			return "", err
+		db            = c.getDB(ctx)
+		modelCategory = model.Category{
+			ID:          req.ID,
+			ParentID:    req.ParentID,
+			Name:        req.Name,
+			Icon:        req.Icon,
+			Slug:        req.Slug,
+			Description: req.Description,
+			Status:      strings.ToLower(req.Status) == "published",
 		}
-		return "", err
-	}
-
-	modelCategory = model.Category{
-		ID:          req.ID,
-		ParentID:    req.ParentID,
-		Name:        req.Name,
-		Icon:        req.Icon,
-		Slug:        req.Slug,
-		Description: req.Description,
-		Status:      strings.ToLower(req.Status) == "published",
-	}
+	)
 
 	tx := db.WithContext(ctx).Updates(&modelCategory)
 	if tx.Error != nil {
-		c.logger.Errorf("[CategoryRepository-2] UpdateCategory: %v", tx.Error)
+		c.logger.Errorf("[CategoryRepository-1] UpdateCategory: %v", tx.Error)
 		if strings.Contains(tx.Error.Error(), "duplicate key") {
 			err := errors.New(utils.DATA_ALREADY_EXISTS)
-			return "", err
+			return err
 		}
-		return "", tx.Error
+		return tx.Error
 	}
 
-	return categoryUpdateDTO.Slug, nil
+	if tx.RowsAffected == 0 {
+		err := errors.New(utils.DATA_NOT_FOUND)
+		c.logger.Errorf("[CategoryRepository-2] UpdateCategory: %v", err)
+		return err
+	}
+
+	return nil
 }
 
 // CreateCategory implements CategoryRepositoryInterface.

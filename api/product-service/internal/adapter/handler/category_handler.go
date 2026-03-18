@@ -296,7 +296,7 @@ func (ch *categoryHandler) GetCategoryByIdAdmin(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id is invalid"))
 	}
 
-	result, err := ch.categoryService.GetCategoryByIdOrSlug(ctx, id, "")
+	result, err := ch.categoryService.GetCategoryById(ctx, id)
 	if err != nil {
 		c.Logger().Warnf("[CategoryHandler-4] GetCategoryByIdAdmin: %v", err)
 		if err.Error() == utils.DATA_NOT_FOUND {
@@ -336,7 +336,7 @@ func (ch *categoryHandler) GetCategoryBySlugAdmin(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed("slug is required"))
 	}
 
-	result, err := ch.categoryService.GetCategoryByIdOrSlug(ctx, 0, slug)
+	result, err := ch.categoryService.GetCategoryBySlug(ctx, slug)
 	if err != nil {
 		c.Logger().Warnf("[CategoryHandler-3] GetCategoryBySlugAdmin: %v", err)
 		if err.Error() == utils.DATA_NOT_FOUND {

@@ -544,7 +544,6 @@ func (p *productHandler) GetAllProductsAdmin(c echo.Context) error {
 	}
 
 	search := c.QueryParam("search")
-	categorySlug := c.QueryParam("category_slug")
 
 	orderBy := c.QueryParam("order_by")
 	if orderBy == "" {
@@ -556,43 +555,50 @@ func (p *productHandler) GetAllProductsAdmin(c echo.Context) error {
 		orderType = "desc"
 	}
 
-	page, err := conv.ParseInt64QueryParam(c, "page", 1)
+	categoryId, err := conv.ParseInt64QueryParam(c, "category", 0)
 	if err != nil {
 		c.Logger().Errorf("[ProductHandler-2] GetAllProductsAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
-	limit, err := conv.ParseInt64QueryParam(c, "limit", 10)
+	page, err := conv.ParseInt64QueryParam(c, "page", 1)
 	if err != nil {
 		c.Logger().Errorf("[ProductHandler-3] GetAllProductsAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
-	startPrice, err := conv.ParseInt64QueryParam(c, "start_price", 0)
+	limit, err := conv.ParseInt64QueryParam(c, "limit", 10)
 	if err != nil {
 		c.Logger().Errorf("[ProductHandler-4] GetAllProductsAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
+	startPrice, err := conv.ParseInt64QueryParam(c, "start_price", 0)
+	if err != nil {
+		c.Logger().Errorf("[ProductHandler-5] GetAllProductsAdmin: %v", err)
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
+	}
+
 	endPrice, err := conv.ParseInt64QueryParam(c, "end_price", 0)
 	if err != nil {
+		c.Logger().Errorf("[ProductHandler-6] GetAllProductsAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	reqEntity := entity.QueryStringProduct{
-		Search:       search,
-		Page:         page,
-		Limit:        limit,
-		OrderBy:      orderBy,
-		OrderType:    orderType,
-		CategorySlug: categorySlug,
-		StartPrice:   startPrice,
-		EndPrice:     endPrice,
+		Search:     search,
+		Page:       page,
+		Limit:      limit,
+		OrderBy:    orderBy,
+		OrderType:  orderType,
+		CategoryID: categoryId,
+		StartPrice: startPrice,
+		EndPrice:   endPrice,
 	}
 
 	results, totalPages, countData, err := p.service.GetAllProducts(ctx, reqEntity)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-5] GetAllProductsAdmin: %v", err)
+		c.Logger().Errorf("[ProductHandler-7] GetAllProductsAdmin: %v", err)
 		if err.Error() == utils.DATA_NOT_FOUND {
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.DATA_NOT_FOUND))
 		}

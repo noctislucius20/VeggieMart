@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"user-service/internal/adapter/repository"
 	"user-service/internal/adapter/repository/cache"
 	"user-service/internal/core/domain/entity"
@@ -35,7 +34,8 @@ func NewRoleService(repo repository.RoleRepositoryInterface, redisClient *redis.
 		redisClient: redisClient,
 		cacheRole:   cacheRole,
 		txManager:   txManager,
-		logger:      logger}
+		logger:      logger,
+	}
 }
 
 // GetRoleByNameAdmin implements [RoleServiceInterface].
@@ -81,12 +81,6 @@ func (r *roleService) CreateRoleAdmin(ctx context.Context, req entity.RoleEntity
 	}); err != nil {
 		r.logger.Errorf("[RoleService-1] CreateRoleAdmin: %v", err)
 		return 0, err
-	}
-
-	// redis delete key
-	key := fmt.Sprintf("role:%d", roleId)
-	if err := r.redisClient.Del(ctx, key).Err(); err != nil {
-		r.logger.Errorf("[RoleService-2] CreateRoleAdmin: %v", err)
 	}
 
 	return roleId, nil

@@ -12,7 +12,7 @@ type Category struct {
 	Name        string          `gorm:"type:varchar(100);not null"`
 	Icon        string          `gorm:"type:varchar(255);not null"`
 	Status      bool            `gorm:"type:boolean;default:true;index:idx_categories_status"`
-	Slug        string          `gorm:"type:varchar(120);not null;uniqeIndex:idx_categories_slug_unique,where:deleted_at IS NULL"`
+	Slug        string          `gorm:"type:varchar(120);not null;uniqueIndex:idx_categories_slug_unique,where:deleted_at IS NULL"`
 	Description string          `gorm:"type:text"`
 	CreatedAt   time.Time       `gorm:"type:timestamp;default:current_timestamp"`
 	UpdatedAt   time.Time       `gorm:"type:timestamp"`

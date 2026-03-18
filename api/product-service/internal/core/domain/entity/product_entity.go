@@ -4,7 +4,7 @@ import "time"
 
 type ProductEntity struct {
 	ID           int64           `json:"id"`
-	CategoryID   int64           `json:"category_id,omitempty"`
+	CategoryID   int64           `json:"category_id"`
 	CategorySlug string          `json:"category_slug"`
 	ParentID     *int64          `json:"parent_id"`
 	Name         string          `json:"name"`
@@ -23,12 +23,12 @@ type ProductEntity struct {
 }
 
 type QueryStringProduct struct {
-	Search       string
-	Page         int64
-	Limit        int64
-	OrderBy      string
-	OrderType    string
-	CategorySlug string
-	StartPrice   int64
-	EndPrice     int64
+	Search     string
+	Page       int64
+	Limit      int64
+	OrderBy    string
+	OrderType  string
+	CategoryID int64
+	StartPrice int64
+	EndPrice   int64
 }

@@ -2,15 +2,13 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"product-service/config"
 	"product-service/internal/adapter/repository"
+	"product-service/internal/adapter/repository/cache"
 	"product-service/internal/core/domain/entity"
 	"product-service/internal/core/service/transaction"
 	"product-service/utils"
-	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/labstack/gommon/log"
@@ -23,6 +21,8 @@ type ProductServiceInterface interface {
 	CreateProduct(ctx context.Context, req entity.ProductEntity) (int64, error)
 	UpdateProduct(ctx context.Context, req entity.ProductEntity) error
 	DeleteProduct(ctx context.Context, productId int64) error
+
+	getAllProductsCategory(ctx context.Context, products []entity.ProductEntity) error
 }
 
 type productService struct {
@@ -30,16 +30,18 @@ type productService struct {
 	redisClient     *redis.Client
 	categoryService CategoryServiceInterface
 	repoOutbox      repository.OutboxEventInterface
+	cacheProduct    cache.ProductCacheInterface
 	txManager       transaction.TransactionManager
 	logger          *log.Logger
 	cfg             *config.Config
 }
 
-func NewProductService(cfg *config.Config, repo repository.ProductRepositoryInterface, redisClient *redis.Client, txManager transaction.TransactionManager, categoryService CategoryServiceInterface, repoOutbox repository.OutboxEventInterface, logger *log.Logger) ProductServiceInterface {
+func NewProductService(cfg *config.Config, repo repository.ProductRepositoryInterface, redisClient *redis.Client, cacheProduct cache.ProductCacheInterface, txManager transaction.TransactionManager, categoryService CategoryServiceInterface, repoOutbox repository.OutboxEventInterface, logger *log.Logger) ProductServiceInterface {
 	return &productService{
 		cfg:             cfg,
 		repo:            repo,
 		redisClient:     redisClient,
+		cacheProduct:    cacheProduct,
 		txManager:       txManager,
 		categoryService: categoryService,
 		repoOutbox:      repoOutbox,
@@ -76,19 +78,27 @@ func (p *productService) CreateProduct(ctx context.Context, req entity.ProductEn
 	)
 
 	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		categoryEntity, err := p.categoryService.GetCategoryByIdOrSlug(txCtx, 0, req.CategorySlug)
+		categoryEntity, err := p.categoryService.GetCategoryBySlug(txCtx, req.CategorySlug)
 		if err != nil {
+			if err.Error() == utils.DATA_NOT_FOUND {
+				err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+				return err
+			}
 			return err
 		}
 
 		req.CategoryID = categoryEntity.ID
 
-		id, err := p.repo.CreateProduct(txCtx, req)
+		productIdCreated, err := p.repo.CreateProduct(txCtx, req)
 		if err != nil {
 			return err
 		}
 
-		productEntity, err := p.repo.GetProductById(txCtx, id)
+		if err := p.cacheProduct.DeleteProductCache(txCtx, productIdCreated); err != nil {
+			return err
+		}
+
+		productEntity, err := p.cacheProduct.GetProductById(txCtx, productIdCreated)
 		if err != nil {
 			return err
 		}
@@ -103,12 +113,6 @@ func (p *productService) CreateProduct(ctx context.Context, req entity.ProductEn
 	}); err != nil {
 		p.logger.Errorf("[ProductService-1] CreateProduct: %v", err)
 		return 0, err
-	}
-
-	// redis delete key
-	key := fmt.Sprintf("product:%d", productId)
-	if err := p.redisClient.Del(ctx, key); err != nil {
-		p.logger.Errorf("[ProductService-2] CreateProduct: %v", err)
 	}
 
 	return productId, nil
@@ -126,7 +130,11 @@ func (p *productService) DeleteProduct(ctx context.Context, productId int64) err
 		productDeletePayload := map[string]any{
 			"product_id": productId,
 		}
-		if err := p.repoOutbox.CreateEvent(ctx, publishName, productDeletePayload, &productId); err != nil {
+		if err := p.repoOutbox.CreateEvent(txCtx, publishName, productDeletePayload, &productId); err != nil {
+			return err
+		}
+
+		if err := p.cacheProduct.DeleteProductCache(txCtx, productId); err != nil {
 			return err
 		}
 
@@ -136,12 +144,6 @@ func (p *productService) DeleteProduct(ctx context.Context, productId int64) err
 		return err
 	}
 
-	// redis delete key
-	key := fmt.Sprintf("product:%d", productId)
-	if err := p.redisClient.Del(ctx, key); err != nil {
-		p.logger.Errorf("[ProductService-2] DeleteProduct: %v", err)
-	}
-
 	return nil
 }
 
@@ -149,6 +151,13 @@ func (p *productService) DeleteProduct(ctx context.Context, productId int64) err
 func (p *productService) GetAllProducts(ctx context.Context, query entity.QueryStringProduct) ([]entity.ProductEntity, int64, int64, error) {
 	products, countData, totalPages, err := p.repo.SearchProducts(ctx, query)
 	if err == nil {
+		if err := p.getAllProductsCategory(ctx, products); err != nil {
+			if err.Error() == utils.DATA_NOT_FOUND {
+				err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+				return nil, 0, 0, err
+			}
+		}
+
 		return products, countData, totalPages, nil
 	}
 
@@ -172,53 +181,36 @@ func (p *productService) GetAllProducts(ctx context.Context, query entity.QueryS
 // GetProductById implements ProductServiceInterface.
 func (p *productService) GetProductById(ctx context.Context, productId int64) (*entity.ProductEntity, error) {
 	var (
-		product *entity.ProductEntity
-		key     = fmt.Sprintf("product:%d", productId)
+		product entity.ProductEntity
 	)
 
-	// Check redis if data exists.
-	val, err := p.redisClient.Get(ctx, key).Result()
-	if err == nil {
-		// if key exists but value null, return data not found error
-		if val == "null" {
-			err := errors.New(utils.DATA_NOT_FOUND)
-			p.logger.Errorf("[ProductService-1] GetProductById: %v", err)
-			return nil, err
-		}
-
-		json.Unmarshal([]byte(val), &product)
-		return product, nil
-	}
-
-	// Query DB
 	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		productEntity, err := p.repo.GetProductById(txCtx, productId)
+		productEntity, err := p.cacheProduct.GetProductById(txCtx, productId)
 		if err != nil {
 			return err
 		}
 
-		product = productEntity
+		categoryEntity, err := p.categoryService.GetCategoryById(txCtx, productEntity.CategoryID)
+		if err != nil {
+			if err.Error() == utils.DATA_NOT_FOUND {
+				err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+				return err
+			}
+			return err
+		}
+
+		productEntity.CategoryName = categoryEntity.Name
+		productEntity.CategorySlug = categoryEntity.Slug
+
+		product = *productEntity
 
 		return nil
 	}); err != nil {
-		// Save to redis (create key with null value if data not found)
-		if err.Error() == utils.DATA_NOT_FOUND {
-			if err := p.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
-				p.logger.Errorf("[ProductService-2] GetProductById: %v", err)
-			}
-		}
-
-		p.logger.Errorf("[ProductService-3] GetProductById: %v", err)
+		p.logger.Errorf("[ProductService-1] GetProductById: %v", err)
 		return nil, err
 	}
 
-	// Save to redis
-	jsonData, _ := json.Marshal(product)
-	if err := p.redisClient.Set(ctx, key, jsonData, 1*time.Hour).Err(); err != nil {
-		p.logger.Errorf("[ProductService-4] GetProductById: %v", err)
-	}
-
-	return product, nil
+	return &product, nil
 }
 
 // UpdateProduct implements ProductServiceInterface.
@@ -226,23 +218,27 @@ func (p *productService) UpdateProduct(ctx context.Context, req entity.ProductEn
 	publishName := p.cfg.PublisherName.ProductUpdate
 
 	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		categoryEntity, err := p.categoryService.GetCategoryByIdOrSlug(txCtx, 0, req.CategorySlug)
+		categoryEntity, err := p.categoryService.GetCategoryBySlug(txCtx, req.CategorySlug)
 		if err != nil {
 			return err
 		}
 
 		req.CategoryID = categoryEntity.ID
 
-		if err := p.repo.UpdateProduct(ctx, req); err != nil {
+		if err := p.repo.UpdateProduct(txCtx, req); err != nil {
 			return err
 		}
 
-		productEntity, err := p.repo.GetProductById(txCtx, req.ID)
+		if err := p.cacheProduct.DeleteProductCache(txCtx, req.ID); err != nil {
+			return err
+		}
+
+		productEntity, err := p.cacheProduct.GetProductById(txCtx, req.ID)
 		if err != nil {
 			return err
 		}
 
-		if err := p.repoOutbox.CreateEvent(ctx, publishName, productEntity, &productEntity.ID); err != nil {
+		if err := p.repoOutbox.CreateEvent(txCtx, publishName, productEntity, &productEntity.ID); err != nil {
 			return err
 		}
 
@@ -250,6 +246,33 @@ func (p *productService) UpdateProduct(ctx context.Context, req entity.ProductEn
 	}); err != nil {
 		p.logger.Errorf("[ProductService-1] UpdateProduct: %v", err)
 		return err
+	}
+
+	return nil
+}
+
+// getAllProductsCategory implements [ProductServiceInterface].
+func (p *productService) getAllProductsCategory(ctx context.Context, products []entity.ProductEntity) error {
+	categoryIds := map[int64]struct{}{}
+	for _, product := range products {
+		categoryIds[product.CategoryID] = struct{}{}
+	}
+
+	categoryList := make([]int64, 0, len(categoryIds))
+	for id := range categoryIds {
+		categoryList = append(categoryList, id)
+	}
+
+	resultCategories, err := p.categoryService.GetBatchCategories(ctx, categoryList)
+	if err != nil {
+		return err
+	}
+
+	for pIdx, product := range products {
+		if c, ok := resultCategories[product.CategoryID]; ok {
+			products[pIdx].CategoryName = c.Name
+			products[pIdx].CategorySlug = c.Slug
+		}
 	}
 
 	return nil

@@ -198,7 +198,7 @@ func (u *userService) CreateCustomer(ctx context.Context, req entity.UserEntity)
 			return err
 		}
 
-		if err := u.cacheUser.DeleteUserCache(ctx, customerId); err != nil {
+		if err := u.cacheUser.DeleteUserCache(ctx, customerIdCreated); err != nil {
 			return err
 		}
 
@@ -609,6 +609,14 @@ func (u *userService) SignIn(ctx context.Context, req entity.UserEntity) (*entit
 		if err := u.cacheUser.SetUserSession(txCtx, session); err != nil {
 			return err
 		}
+
+		roleEntity, err := u.roleService.GetRoleByIdAdmin(txCtx, userEntity.RoleID)
+		if err != nil {
+			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+			return err
+		}
+
+		userEntity.RoleName = roleEntity.Name
 
 		user, token = userEntity, tokenString
 
