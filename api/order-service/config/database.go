@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"order-service/internal/core/domain/model"
 	customLogger "order-service/utils/logger"
 
 	"gorm.io/driver/postgres"
@@ -40,6 +41,12 @@ func (cfg Config) ConnectionPostgres(ctx context.Context) (*Postgres, error) {
 			log.Errorf("[ConnectionPostgres-2] failed to connect with database")
 			return
 		}
+
+		db.AutoMigrate(
+			&model.Order{},
+			&model.OrderItem{},
+			&model.OutboxEvent{},
+		)
 
 		sqlDB.SetMaxOpenConns(cfg.Psql.DBMaxOpen)
 		sqlDB.SetMaxIdleConns(cfg.Psql.DBMaxIdle)

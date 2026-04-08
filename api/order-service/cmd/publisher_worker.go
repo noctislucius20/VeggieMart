@@ -5,6 +5,7 @@ import (
 	"order-service/config"
 	"order-service/internal/adapter/message/publisher"
 	"order-service/internal/adapter/repository"
+	"order-service/internal/core/service/transaction"
 	"order-service/utils/logger"
 	"os"
 	"os/signal"
@@ -17,18 +18,19 @@ import (
 )
 
 func startPublisherWorker() {
-	customLogger := logger.NewLogger().Logger()
+	var (
+		customLogger = logger.NewLogger().Logger()
+		cfg          = config.NewConfig()
+		wg           sync.WaitGroup
+		txManager    transaction.TransactionManager
+	)
 
 	conn, err := config.NewConfig().NewRabbitMQ()
 	if err != nil {
 		customLogger.Fatalf("[PublisherWorker-1] %v", err.Error())
 	}
 
-	var wg sync.WaitGroup
-
 	ctx, cancel := context.WithCancel(context.Background())
-
-	cfg := config.NewConfig()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
@@ -38,10 +40,10 @@ func startPublisherWorker() {
 		log.Fatalf("[PublisherWorker-2] %v", err.Error())
 	}
 
-	outboxRepo := repository.NewOutboxEventRepository(customLogger)
+	outboxRepo := repository.NewOutboxEventRepository(db.DB, customLogger)
 
 	wg.Go(func() {
-		publisher.NewStartPublisherWorker(db.DB, conn, outboxRepo, customLogger).StartPublisherWorker(ctx)
+		publisher.NewStartPublisherWorker(conn, outboxRepo, txManager, customLogger).StartPublisherWorker(ctx)
 	})
 
 	<-quit

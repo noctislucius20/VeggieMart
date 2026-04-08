@@ -7,34 +7,56 @@ import (
 	"order-service/internal/core/domain/entity"
 	"order-service/internal/core/domain/model"
 	"order-service/utils"
-	"time"
+	"order-service/utils/conv"
+	"strings"
 
 	"github.com/labstack/gommon/log"
 	"gorm.io/gorm"
 )
 
 type OrderRepositoryInterface interface {
-	GetAllOrders(ctx context.Context, query entity.OrderQueryString, db *gorm.DB) ([]entity.OrderEntity, int64, int64, error)
-	GetBatchOrders(ctx context.Context, orderIds []int64, userId int64, db *gorm.DB) ([]entity.OrderEntity, error)
-	GetOrderById(ctx context.Context, orderId int64, userId int64, db *gorm.DB) (*entity.OrderEntity, error)
-	CreateOrder(ctx context.Context, req entity.OrderEntity, db *gorm.DB) (int64, error)
-	UpdateOrderStatus(ctx context.Context, req entity.OrderEntity, db *gorm.DB) error
-	DeleteOrder(ctx context.Context, orderId int64, db *gorm.DB) error
-	GetOrderByOrderCode(ctx context.Context, orderCode string, userId int64, db *gorm.DB) (*entity.OrderEntity, error)
+	GetAllOrders(ctx context.Context, query entity.OrderQueryString) ([]entity.OrderEntity, int64, int64, error)
+	GetBatchOrders(ctx context.Context, orderIds []int64, userId int64) ([]entity.OrderEntity, error)
+	GetOrderById(ctx context.Context, orderId int64, userId int64) (*entity.OrderEntity, error)
+	CreateOrder(ctx context.Context, req entity.OrderEntity) (int64, error)
+	UpdateOrderStatus(ctx context.Context, req entity.OrderEntity) error
+	DeleteOrder(ctx context.Context, orderId int64) error
+	GetOrderByOrderCode(ctx context.Context, orderCode string, userId int64) (*entity.OrderEntity, error)
+
+	getDB(ctx context.Context) *gorm.DB
 }
 
 type orderRepository struct {
+	db     *gorm.DB
 	logger *log.Logger
 }
 
-// GetBatchOrders implements [OrderRepositoryInterface].
-func (o *orderRepository) GetBatchOrders(ctx context.Context, orderIds []int64, userId int64, db *gorm.DB) ([]entity.OrderEntity, error) {
-	chunkSize := 150
+func NewOrderRepository(db *gorm.DB, logger *log.Logger) OrderRepositoryInterface {
+	return &orderRepository{db: db, logger: logger}
+}
 
-	modelOrders := []model.Order{}
+// getDB implements [OrderRepositoryInterface].
+func (o *orderRepository) getDB(ctx context.Context) *gorm.DB {
+	if tx, ok := ctx.Value(txKey{}).(*gorm.DB); ok {
+		return tx
+	}
+
+	return o.db
+}
+
+// GetBatchOrders implements [OrderRepositoryInterface].
+func (o *orderRepository) GetBatchOrders(ctx context.Context, orderIds []int64, userId int64) ([]entity.OrderEntity, error) {
+	var (
+		db          = o.getDB(ctx)
+		modelOrders []model.Order
+		entities    []entity.OrderEntity
+	)
+
+	chunkSize := 150
 
 	for i := 0; i < len(orderIds); i += chunkSize {
 		end := min(i+chunkSize, len(orderIds))
+
 		batchOrders := []model.Order{}
 
 		sqlMain := db.WithContext(ctx).
@@ -63,32 +85,35 @@ func (o *orderRepository) GetBatchOrders(ctx context.Context, orderIds []int64, 
 		return nil, err
 	}
 
-	entities := []entity.OrderEntity{}
 	for _, val := range modelOrders {
-		orderItemEntities := []entity.OrderItemEntity{}
-		for _, prd := range val.OrderItems {
-			orderItemEntities = append(orderItemEntities, entity.OrderItemEntity{
-				ID:        prd.ID,
-				ProductID: prd.ProductID,
-				Quantity:  prd.Quantity,
-			})
-		}
-
-		entities = append(entities, entity.OrderEntity{
+		orderEntity := entity.OrderEntity{
 			ID:           val.ID,
 			OrderCode:    val.OrderCode,
 			ShippingType: val.ShippingType,
 			BuyerID:      val.BuyerID,
-			OrderItems:   orderItemEntities,
-		})
+		}
+
+		for _, item := range val.OrderItems {
+			orderEntity.OrderItems = append(orderEntity.OrderItems, entity.OrderItemEntity{
+				ID:        item.ID,
+				ProductID: item.ProductID,
+				Quantity:  item.Quantity,
+			})
+		}
+
+		entities = append(entities, orderEntity)
 	}
 
 	return entities, nil
 }
 
 // GetOrderByOrderCode implements [OrderRepositoryInterface].
-func (o *orderRepository) GetOrderByOrderCode(ctx context.Context, orderCode string, userId int64, db *gorm.DB) (*entity.OrderEntity, error) {
-	modelOrder := model.Order{}
+func (o *orderRepository) GetOrderByOrderCode(ctx context.Context, orderCode string, userId int64) (*entity.OrderEntity, error) {
+	var (
+		db          = o.getDB(ctx)
+		modelOrder  model.Order
+		orderEntity *entity.OrderEntity
+	)
 
 	sqlMain := db.WithContext(ctx).
 		Where("order_code = ?", orderCode).
@@ -106,66 +131,70 @@ func (o *orderRepository) GetOrderByOrderCode(ctx context.Context, orderCode str
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			err = errors.New(utils.DATA_NOT_FOUND)
 		}
-		o.logger.Errorf("[OrderRepository-1] GetOrderByOrderCode: %v", err.Error())
+		o.logger.Errorf("[OrderRepository-1] GetOrderByOrderCode: %v", err)
 		return nil, err
 	}
 
-	orderItemEntities := []entity.OrderItemEntity{}
-	for _, item := range modelOrder.OrderItems {
-		orderItemEntities = append(orderItemEntities, entity.OrderItemEntity{
-			ID:        item.ID,
-			ProductID: item.ProductID,
-			Quantity:  item.Quantity,
-		})
-	}
-
-	return &entity.OrderEntity{
+	orderEntity = &entity.OrderEntity{
 		ID:           modelOrder.ID,
 		OrderCode:    modelOrder.OrderCode,
 		OrderDate:    modelOrder.OrderDate.Format("2006-01-02"),
-		OrderTime:    modelOrder.OrderTime,
+		OrderTime:    modelOrder.OrderTime.Format("15:04:05"),
 		Status:       modelOrder.Status,
 		BuyerID:      modelOrder.BuyerID,
 		TotalAmount:  int64(modelOrder.TotalAmount),
 		Remarks:      modelOrder.Remarks,
 		ShippingType: modelOrder.ShippingType,
 		ShippingFee:  int64(modelOrder.ShippingFee),
-		OrderItems:   orderItemEntities,
-	}, nil
+	}
+
+	for _, item := range modelOrder.OrderItems {
+		orderEntity.OrderItems = append(orderEntity.OrderItems, entity.OrderItemEntity{
+			ID:        item.ID,
+			OrderID:   item.OrderID,
+			ProductID: item.ProductID,
+			Quantity:  item.Quantity,
+		})
+	}
+
+	return orderEntity, nil
 }
 
 // CreateOrder implements [OrderRepositoryInterface].
-func (o *orderRepository) CreateOrder(ctx context.Context, req entity.OrderEntity, db *gorm.DB) (int64, error) {
-	orderDate, err := time.Parse("2006-01-02", req.OrderDate)
+func (o *orderRepository) CreateOrder(ctx context.Context, req entity.OrderEntity) (int64, error) {
+	orderDate, orderTime, err := conv.ParseStringToDateTime(req.OrderDate, req.OrderTime)
 	if err != nil {
-		o.logger.Errorf("[OrderRepository-1] CreateOrder: %v", err.Error())
+		o.logger.Errorf("[OrderRepository-1] CreateOrder: %v", err)
 		return 0, err
 	}
 
-	orderItems := []model.OrderItem{}
+	var (
+		db         = o.getDB(ctx)
+		modelOrder = &model.Order{
+			OrderCode:    req.OrderCode,
+			BuyerID:      req.BuyerID,
+			OrderDate:    *orderDate,
+			OrderTime:    *orderTime,
+			Status:       req.Status,
+			TotalAmount:  float64(req.TotalAmount),
+			ShippingType: req.ShippingType,
+			ShippingFee:  float64(req.ShippingFee),
+			Remarks:      req.Remarks,
+		}
+	)
+
 	for _, item := range req.OrderItems {
-		orderItem := model.OrderItem{
+		modelOrder.OrderItems = append(modelOrder.OrderItems, model.OrderItem{
 			ProductID: item.ProductID,
 			Quantity:  item.Quantity,
-		}
-		orderItems = append(orderItems, orderItem)
-	}
-
-	modelOrder := model.Order{
-		OrderCode:    req.OrderCode,
-		BuyerID:      req.BuyerID,
-		OrderDate:    orderDate,
-		OrderTime:    req.OrderTime,
-		Status:       req.Status,
-		TotalAmount:  float64(req.TotalAmount),
-		ShippingType: req.ShippingType,
-		ShippingFee:  float64(req.ShippingFee),
-		Remarks:      req.Remarks,
-		OrderItems:   orderItems,
+		})
 	}
 
 	if err := db.WithContext(ctx).Create(&modelOrder).Error; err != nil {
-		o.logger.Errorf("[OrderRepository-2] CreateOrder: %v", err.Error())
+		o.logger.Errorf("[OrderRepository-2] CreateOrder: %v", err)
+		if strings.Contains(err.Error(), "foreign key") {
+			err = errors.New(utils.RELATION_DATA_NOT_FOUND)
+		}
 		return 0, err
 	}
 
@@ -173,15 +202,18 @@ func (o *orderRepository) CreateOrder(ctx context.Context, req entity.OrderEntit
 }
 
 // DeleteOrder implements [OrderRepositoryInterface].
-func (o *orderRepository) DeleteOrder(ctx context.Context, orderId int64, db *gorm.DB) error {
+func (o *orderRepository) DeleteOrder(ctx context.Context, orderId int64) error {
 	panic("unimplemented")
 }
 
 // GetAllOrders implements [OrderRepositoryInterface].
-func (o *orderRepository) GetAllOrders(ctx context.Context, query entity.OrderQueryString, db *gorm.DB) ([]entity.OrderEntity, int64, int64, error) {
-	modelOrders := []model.Order{}
-
-	var countData int64
+func (o *orderRepository) GetAllOrders(ctx context.Context, query entity.OrderQueryString) ([]entity.OrderEntity, int64, int64, error) {
+	var (
+		db          = o.getDB(ctx)
+		modelOrders []model.Order
+		entities    []entity.OrderEntity
+		countData   int64
+	)
 
 	offset := (query.Page - 1) * query.Limit
 
@@ -196,7 +228,7 @@ func (o *orderRepository) GetAllOrders(ctx context.Context, query entity.OrderQu
 	}
 
 	if err := sqlMain.Model(&modelOrders).Count(&countData).Error; err != nil {
-		o.logger.Errorf("[OrderRepository-1] GetAllOrders: %v", err.Error())
+		o.logger.Errorf("[OrderRepository-1] GetAllOrders: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -205,39 +237,42 @@ func (o *orderRepository) GetAllOrders(ctx context.Context, query entity.OrderQu
 		Limit(int(query.Limit)).
 		Offset(int(offset)).
 		Find(&modelOrders).Error; err != nil {
-		o.logger.Errorf("[OrderRepository-2] GetAllOrders: %v", err.Error())
+		o.logger.Errorf("[OrderRepository-2] GetAllOrders: %v", err)
 		return nil, 0, 0, err
 	}
 
-	entities := []entity.OrderEntity{}
 	for _, val := range modelOrders {
-		orderItemEntities := []entity.OrderItemEntity{}
-		for _, prd := range val.OrderItems {
-			orderItemEntities = append(orderItemEntities, entity.OrderItemEntity{
-				ID:        prd.ID,
-				ProductID: prd.ProductID,
-				Quantity:  prd.Quantity,
-			})
-		}
-
-		entities = append(entities, entity.OrderEntity{
+		orderEntity := entity.OrderEntity{
 			ID:          val.ID,
 			OrderCode:   val.OrderCode,
 			Status:      val.Status,
 			OrderDate:   val.OrderDate.Format("2006-01-02"),
-			OrderTime:   val.OrderTime,
+			OrderTime:   val.OrderTime.Format("15:04:05"),
 			TotalAmount: int64(val.TotalAmount),
 			BuyerID:     val.BuyerID,
-			OrderItems:  orderItemEntities,
-		})
+		}
+
+		for _, item := range val.OrderItems {
+			orderEntity.OrderItems = append(orderEntity.OrderItems, entity.OrderItemEntity{
+				ID:        item.ID,
+				ProductID: item.ProductID,
+				Quantity:  item.Quantity,
+			})
+		}
+
+		entities = append(entities, orderEntity)
 	}
 
 	return entities, countData, int64(totalPages), nil
 }
 
 // GetOrderById implements [OrderRepositoryInterface].
-func (o *orderRepository) GetOrderById(ctx context.Context, orderId int64, userId int64, db *gorm.DB) (*entity.OrderEntity, error) {
-	modelOrder := model.Order{}
+func (o *orderRepository) GetOrderById(ctx context.Context, orderId int64, userId int64) (*entity.OrderEntity, error) {
+	var (
+		db          = o.getDB(ctx)
+		modelOrder  model.Order
+		orderEntity *entity.OrderEntity
+	)
 
 	sqlMain := db.WithContext(ctx).
 		Where("id = ?", orderId).
@@ -251,53 +286,53 @@ func (o *orderRepository) GetOrderById(ctx context.Context, orderId int64, userI
 	}
 
 	if err := sqlMain.First(&modelOrder).Error; err != nil {
+		o.logger.Errorf("[OrderRepository-1] GetOrderById: %v", err)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			err = errors.New(utils.DATA_NOT_FOUND)
 		}
-		o.logger.Errorf("[OrderRepository-1] GetOrderById: %v", err.Error())
 		return nil, err
 	}
 
-	orderItemEntities := []entity.OrderItemEntity{}
-	for _, item := range modelOrder.OrderItems {
-		orderItemEntities = append(orderItemEntities, entity.OrderItemEntity{
-			ID:        item.ID,
-			ProductID: item.ProductID,
-			Quantity:  item.Quantity,
-		})
-	}
-
-	return &entity.OrderEntity{
+	orderEntity = &entity.OrderEntity{
 		ID:           modelOrder.ID,
 		OrderCode:    modelOrder.OrderCode,
 		OrderDate:    modelOrder.OrderDate.Format("2006-01-02"),
-		OrderTime:    modelOrder.OrderTime,
+		OrderTime:    modelOrder.OrderTime.Format("15:04:05"),
 		Status:       modelOrder.Status,
 		BuyerID:      modelOrder.BuyerID,
 		TotalAmount:  int64(modelOrder.TotalAmount),
 		Remarks:      modelOrder.Remarks,
 		ShippingType: modelOrder.ShippingType,
 		ShippingFee:  int64(modelOrder.ShippingFee),
-		OrderItems:   orderItemEntities,
-	}, nil
+	}
+
+	for _, item := range modelOrder.OrderItems {
+		orderEntity.OrderItems = append(orderEntity.OrderItems, entity.OrderItemEntity{
+			ID:        item.ID,
+			OrderID:   item.OrderID,
+			ProductID: item.ProductID,
+			Quantity:  item.Quantity,
+		})
+	}
+
+	return orderEntity, nil
 }
 
 // UpdateOrderStatus implements [OrderRepositoryInterface].
-func (o *orderRepository) UpdateOrderStatus(ctx context.Context, req entity.OrderEntity, db *gorm.DB) error {
-	modelOrder := model.Order{
-		ID:      req.ID,
-		Status:  req.Status,
-		Remarks: req.Remarks,
-	}
+func (o *orderRepository) UpdateOrderStatus(ctx context.Context, req entity.OrderEntity) error {
+	var (
+		db         = o.getDB(ctx)
+		modelOrder = model.Order{
+			ID:      req.ID,
+			Status:  req.Status,
+			Remarks: req.Remarks,
+		}
+	)
 
 	if err := db.WithContext(ctx).Updates(&modelOrder).Error; err != nil {
-		o.logger.Errorf("[OrderRepository-1] UpdateOrderStatus: %v", err.Error())
+		o.logger.Errorf("[OrderRepository-1] UpdateOrderStatus: %v", err)
 		return err
 	}
 
 	return nil
-}
-
-func NewOrderRepository(logger *log.Logger) OrderRepositoryInterface {
-	return &orderRepository{logger: logger}
 }

@@ -11,11 +11,11 @@ type OrderEntity struct {
 	ShippingFee  int64             `json:"shipping_fee"`
 	OrderTime    string            `json:"order_time"`
 	Remarks      string            `json:"remarks"`
-	OrderItems   []OrderItemEntity `json:"order_items"`
 	BuyerName    string            `json:"buyer_name"`
 	BuyerEmail   string            `json:"buyer_email"`
 	BuyerPhone   string            `json:"buyer_phone"`
 	BuyerAddress string            `json:"buyer_address"`
+	OrderItems   []OrderItemEntity `json:"order_items"`
 }
 
 type OrderQueryString struct {

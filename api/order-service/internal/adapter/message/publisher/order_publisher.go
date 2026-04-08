@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"order-service/internal/adapter/repository"
 	"order-service/internal/core/domain/entity"
+	"order-service/internal/core/service/transaction"
 	"order-service/utils"
 	"sync"
 	"time"
 
 	"github.com/labstack/gommon/log"
 	amqp "github.com/rabbitmq/amqp091-go"
-	"gorm.io/gorm"
 )
 
 type StartPublisherWorkerInterface interface {
@@ -20,10 +20,18 @@ type StartPublisherWorkerInterface interface {
 }
 
 type startPublisherWorker struct {
-	db         *gorm.DB
 	repoOutbox repository.OutboxEventInterface
+	txManager  transaction.TransactionManager
 	conn       *amqp.Connection
 	logger     *log.Logger
+}
+
+func NewStartPublisherWorker(conn *amqp.Connection, repoOutbox repository.OutboxEventInterface, txManager transaction.TransactionManager, logger *log.Logger) StartPublisherWorkerInterface {
+	return &startPublisherWorker{
+		conn:       conn,
+		repoOutbox: repoOutbox,
+		txManager:  txManager,
+		logger:     logger}
 }
 
 // StartPublisherWorker implements StartPublisherWorkerInterface.
@@ -43,9 +51,9 @@ func (s *startPublisherWorker) StartPublisherWorker(ctx context.Context) {
 		})
 	}
 
-	wg.Wait()
-
 	close(jobChan)
+
+	wg.Wait()
 }
 
 func (s *startPublisherWorker) startPoller(ctx context.Context, jobs chan<- entity.OutboxEventEntity) {
@@ -59,15 +67,15 @@ func (s *startPublisherWorker) startPoller(ctx context.Context, jobs chan<- enti
 		case <-time.After(busyDelay):
 			var outboxes, err = []entity.OutboxEventEntity{}, errors.New("")
 
-			if err := s.db.Transaction(func(tx *gorm.DB) error {
-				outboxes, err = s.repoOutbox.GetAllPendingEvent(ctx, tx)
+			if err := s.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+				outboxes, err = s.repoOutbox.GetAllPendingEvent(txCtx)
 				if err != nil {
 					return err
 				}
 
 				return nil
 			}); err != nil {
-				s.logger.Errorf("[StartPublisherWorker-2] startPoller: %v", err.Error())
+				s.logger.Errorf("[StartPublisherWorker-2] startPoller: %v", err)
 				return
 			}
 
@@ -90,14 +98,14 @@ func (s *startPublisherWorker) startPoller(ctx context.Context, jobs chan<- enti
 func (s *startPublisherWorker) startPublisher(ctx context.Context, jobs <-chan entity.OutboxEventEntity) {
 	ch, err := s.conn.Channel()
 	if err != nil {
-		s.logger.Errorf("[StartPublisherWorker-1] startPublisher: %v", err.Error())
+		s.logger.Errorf("[StartPublisherWorker-1] startPublisher: %v", err)
 		return
 	}
 
 	defer ch.Close()
 
 	if err := ch.Confirm(false); err != nil {
-		s.logger.Errorf("[StartPublisherWorker-2] startPublisher: %v", err.Error())
+		s.logger.Errorf("[StartPublisherWorker-2] startPublisher: %v", err)
 		return
 	}
 
@@ -114,33 +122,33 @@ func (s *startPublisherWorker) startPublisher(ctx context.Context, jobs <-chan e
 			}
 
 			if _, err = ch.QueueDeclare(outbox.EventType, true, false, false, false, nil); err != nil {
-				s.logger.Errorf("[StartPublisherWorker-4] startPublisher: %v", err.Error())
+				s.logger.Errorf("[StartPublisherWorker-4] startPublisher: %v", err)
 				return
 			}
 
 			if err := s.publishOne(ctx, ch, confirms, outbox); err != nil {
-				if err := s.db.Transaction(func(tx *gorm.DB) error {
-					if err := s.repoOutbox.UpdateFailedEvent(ctx, []int64{outbox.ID}, tx); err != nil {
+				if err := s.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+					if err := s.repoOutbox.UpdateFailedEvent(txCtx, []int64{outbox.ID}); err != nil {
 						return err
 					}
 
 					return nil
 				}); err != nil {
-					s.logger.Errorf("[StartPublisherWorker-5] startPublisher: %v", err.Error())
+					s.logger.Errorf("[StartPublisherWorker-5] startPublisher: %v", err)
 					return
 				}
 
 				continue
 			}
 
-			if err := s.db.Transaction(func(tx *gorm.DB) error {
-				if err := s.repoOutbox.UpdatePublishedEvent(ctx, []int64{outbox.ID}, tx); err != nil {
+			if err := s.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+				if err := s.repoOutbox.UpdatePublishedEvent(txCtx, []int64{outbox.ID}); err != nil {
 					return err
 				}
 
 				return nil
 			}); err != nil {
-				s.logger.Errorf("[StartPublisherWorker-6] startPublisher: %v", err.Error())
+				s.logger.Errorf("[StartPublisherWorker-6] startPublisher: %v", err)
 				return
 			}
 		}
@@ -159,7 +167,7 @@ func (s *startPublisherWorker) publishOne(ctx context.Context, ch *amqp.Channel,
 			Body:        []byte(outbox.Payload),
 			MessageId:   fmt.Sprintf("%d", outbox.ID),
 		}); err != nil {
-		s.logger.Errorf("[StartPublisherWorker-1] publishOne: %v", err.Error())
+		s.logger.Errorf("[StartPublisherWorker-1] publishOne: %v", err)
 		return err
 	}
 
@@ -169,7 +177,7 @@ func (s *startPublisherWorker) publishOne(ctx context.Context, ch *amqp.Channel,
 	select {
 	case <-ctx.Done():
 		err := errors.New(utils.SERVICE_UNAVAILABLE)
-		s.logger.Errorf("[StartPublisherWorker-2] publishOne: %v", err.Error())
+		s.logger.Errorf("[StartPublisherWorker-2] publishOne: %v", err)
 
 		return err
 	case confirm := <-confirms:
@@ -185,8 +193,4 @@ func (s *startPublisherWorker) publishOne(ctx context.Context, ch *amqp.Channel,
 	}
 
 	return nil
-}
-
-func NewStartPublisherWorker(db *gorm.DB, conn *amqp.Connection, repoOutbox repository.OutboxEventInterface, logger *log.Logger) StartPublisherWorkerInterface {
-	return &startPublisherWorker{db: db, conn: conn, repoOutbox: repoOutbox, logger: logger}
 }

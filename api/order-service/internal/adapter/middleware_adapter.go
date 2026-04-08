@@ -3,17 +3,18 @@ package adapter
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"order-service/config"
 	"order-service/internal/adapter/handler/response"
 	"order-service/internal/core/domain/entity"
+	"order-service/internal/core/service"
 	"order-service/utils"
 	"order-service/utils/conv"
 	"strings"
 
 	"github.com/go-redis/redis/v8"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/gommon/log"
 )
@@ -25,8 +26,19 @@ type MiddlewareAdapterInterface interface {
 }
 
 type middlewareAdapter struct {
-	cfg    *config.Config
-	logger *log.Logger
+	cfg         *config.Config
+	jwtService  service.JwtServiceInterface
+	redisClient *redis.Client
+	logger      *log.Logger
+}
+
+func NewMiddlewareAdapter(cfg *config.Config, logger *log.Logger, jwtService service.JwtServiceInterface, redisClient *redis.Client) MiddlewareAdapterInterface {
+	return &middlewareAdapter{
+		cfg:         cfg,
+		jwtService:  jwtService,
+		redisClient: redisClient,
+		logger:      logger,
+	}
 }
 
 // haversineDistance implements [MiddlewareAdapterInterface].
@@ -57,21 +69,24 @@ func (m *middlewareAdapter) DistanceCheck() echo.MiddlewareFunc {
 			latParam := c.QueryParam("lat")
 			lngParam := c.QueryParam("lng")
 			if latParam == "" || lngParam == "" {
-				m.logger.Errorf("[MiddlewareAdapter-1] DistanceCheck: %s", "lat or lng required")
-				return c.JSON(http.StatusBadRequest, response.ResponseFailed("lat or lng required"))
+				err := errors.New(utils.LAT_OR_LNG_REQUIRED)
+				m.logger.Errorf("[MiddlewareAdapter-1] DistanceCheck: %v", err)
+				return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 			}
 
 			lat, lng, err := conv.ParseLatLngToFloat64(latParam, lngParam)
 			if err != nil {
-				m.logger.Errorf("[MiddlewareAdapter-2] DistanceCheck: %s", "lat or lng invalid")
-				return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("lat or lng invalid"))
+				err := errors.New(utils.LAT_OR_LNG_INVALID)
+				m.logger.Errorf("[MiddlewareAdapter-2] DistanceCheck: %v", err)
+				return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 			}
 
 			latRef, lngRef, _ := conv.ParseLatLngToFloat64(m.cfg.App.LatitudeRef, m.cfg.App.LongitudeRef)
 			distance := m.haversineDistance(latRef, lngRef, lat, lng)
 			if distance > float64(m.cfg.App.MaxDistance) {
-				m.logger.Errorf("[MiddlewareAdapter-3] DistanceCheck: %s", "distance too far")
-				return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("distance too far"))
+				err := errors.New(utils.DISTANCE_TOO_FAR)
+				m.logger.Errorf("[MiddlewareAdapter-3] DistanceCheck: %v", err)
+				return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 			}
 
 			return next(c)
@@ -83,38 +98,37 @@ func (m *middlewareAdapter) DistanceCheck() echo.MiddlewareFunc {
 func (m *middlewareAdapter) CheckToken() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			redisConn := m.cfg.NewRedisClient()
-
 			authHeader := c.Request().Header.Get("Authorization")
 			if authHeader == "" {
 				err := errors.New(utils.TOKEN_INVALID)
-				m.logger.Errorf("[MiddlewareAdapter-1] CheckToken: %v", err.Error())
+				m.logger.Errorf("[MiddlewareAdapter-1] CheckToken: %v", err)
 				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 			}
 
 			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 
-			_, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
-				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-					return nil, jwt.ErrSignatureInvalid
-				}
-
-				return []byte(m.cfg.App.JwtSecretKey), nil
-			})
+			_, err := m.jwtService.ValidateToken(tokenString)
 			if err != nil {
 				err := errors.New(utils.SESSION_EXPIRED)
-				m.logger.Errorf("[MiddlewareAdapter-2] CheckToken: %v", err.Error())
+				m.logger.Errorf("[MiddlewareAdapter-2] CheckToken: %v", err)
 				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 			}
 
-			getSession, err := redisConn.Get(c.Request().Context(), tokenString).Result()
+			keyIdxSession := fmt.Sprintf("user:session:%s", tokenString)
+			getIdxSession, err := m.redisClient.Get(c.Request().Context(), keyIdxSession).Result()
 			if err != nil {
+				m.logger.Errorf("[MiddlewareAdapter-3] CheckToken: %v", err)
 				if errors.Is(err, redis.Nil) {
 					err := errors.New(utils.TOKEN_INVALID)
-					m.logger.Errorf("[MiddlewareAdapter-3] CheckToken: %v", err.Error())
 					return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 				}
-				m.logger.Errorf("[MiddlewareAdapter-4] CheckToken: %v", err.Error())
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			}
+
+			keySession := fmt.Sprintf("user:id:%s:session", getIdxSession)
+			getSession, err := m.redisClient.Get(c.Request().Context(), keySession).Result()
+			if err != nil {
+				m.logger.Errorf("[MiddlewareAdapter-4] CheckToken: %v", err)
 				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 			}
 
@@ -123,7 +137,7 @@ func (m *middlewareAdapter) CheckToken() echo.MiddlewareFunc {
 			jwtUserData := entity.JwtUserData{}
 			err = json.Unmarshal([]byte(getSession), &jwtUserData)
 			if err != nil {
-				m.logger.Errorf("[MiddlewareAdapter-5] CheckToken: %v", err.Error())
+				m.logger.Errorf("[MiddlewareAdapter-5] CheckToken: %v", err)
 				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
 			}
 
@@ -132,17 +146,11 @@ func (m *middlewareAdapter) CheckToken() echo.MiddlewareFunc {
 
 			if strings.ToLower(jwtUserData.RoleName) == "customer" && segments[0] == "admin" {
 				err := errors.New(utils.ACCESS_FORBIDDEN)
-				m.logger.Errorf("[MiddlewareAdapter-6] CheckToken: %v", err.Error())
+				m.logger.Errorf("[MiddlewareAdapter-6] CheckToken: %v", err)
 				return c.JSON(http.StatusForbidden, response.ResponseFailed(err.Error()))
 			}
 
 			return next(c)
 		}
-	}
-}
-
-func NewMiddlewareAdapter(cfg *config.Config, logger *log.Logger) MiddlewareAdapterInterface {
-	return &middlewareAdapter{
-		cfg: cfg, logger: logger,
 	}
 }

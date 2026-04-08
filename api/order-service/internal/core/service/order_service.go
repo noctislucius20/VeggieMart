@@ -2,32 +2,32 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"order-service/config"
 	"order-service/internal/adapter/repository"
+	"order-service/internal/adapter/repository/cache"
 	"order-service/internal/core/domain/entity"
+	"order-service/internal/core/service/transaction"
 	"order-service/utils"
 	"order-service/utils/conv"
 	"strings"
 	"sync"
 
 	"github.com/labstack/gommon/log"
-	"gorm.io/gorm"
 )
 
 type OrderServiceInterface interface {
-	GetAllOrdersAdmin(ctx context.Context, query entity.OrderQueryString, userData string) ([]entity.OrderEntity, int64, int64, error)
-	GetBatchOrders(ctx context.Context, orderIds []int64, jwtUserData entity.JwtUserData, userData string) ([]entity.OrderEntity, error)
-	GetOrderByIdAdmin(ctx context.Context, orderId int64, userData string) (*entity.OrderEntity, error)
-	UpdateOrderStatus(ctx context.Context, req entity.OrderEntity, userData string) error
-	GetOrderByOrderCode(ctx context.Context, orderCode string, jwtUserData entity.JwtUserData, userData string) (*entity.OrderEntity, error)
-
 	CreateOrder(ctx context.Context, req entity.OrderEntity, userData string) (int64, string, error)
 	GetAllOrders(ctx context.Context, query entity.OrderQueryString, userData string) ([]entity.OrderEntity, int64, int64, error)
+	GetAllOrdersAdmin(ctx context.Context, query entity.OrderQueryString, userData string) ([]entity.OrderEntity, int64, int64, error)
+	GetBatchOrders(ctx context.Context, orderIds []int64, jwtUserData entity.JwtUserData, userData string) ([]entity.OrderEntity, error)
 	GetOrderById(ctx context.Context, orderId int64, userId int64, userData string) (*entity.OrderEntity, error)
-
+	GetOrderByIdAdmin(ctx context.Context, orderId int64, userData string) (*entity.OrderEntity, error)
+	GetOrderByOrderCode(ctx context.Context, orderCode string, jwtUserData entity.JwtUserData, userData string) (*entity.OrderEntity, error)
 	GetOrderIdByOrderCodePublic(ctx context.Context, orderCode string) (int64, error)
+	UpdateOrderStatus(ctx context.Context, req entity.OrderEntity, userData string) error
 
 	getAllProductsUsersAdmin(ctx context.Context, orders []entity.OrderEntity, userData string) error
 	getProductsUserByIdAdmin(ctx context.Context, order *entity.OrderEntity, userData string) error
@@ -39,17 +39,32 @@ type orderService struct {
 	repo        repository.OrderRepositoryInterface
 	repoOutbox  repository.OutboxEventInterface
 	repoElastic repository.ElasticRepositoryInterface
+	cacheOrder  cache.OrderCacheInterface
+	txManager   transaction.TransactionManager
 	httpService HttpServiceInterface
-	db          *gorm.DB
+	cfg         *config.Config
 	logger      *log.Logger
+}
+
+func NewOrderService(cfg *config.Config, repo repository.OrderRepositoryInterface, repoOutbox repository.OutboxEventInterface, repoElastic repository.ElasticRepositoryInterface, cacheOrder cache.OrderCacheInterface, httpService HttpServiceInterface, txManager transaction.TransactionManager, logger *log.Logger) OrderServiceInterface {
+	return &orderService{
+		cfg:         cfg,
+		repo:        repo,
+		httpService: httpService,
+		logger:      logger,
+		repoOutbox:  repoOutbox,
+		cacheOrder:  cacheOrder,
+		txManager:   txManager,
+		repoElastic: repoElastic,
+	}
 }
 
 // GetOrderIdByOrderCodePublic implements [OrderServiceInterface].
 func (o *orderService) GetOrderIdByOrderCodePublic(ctx context.Context, orderCode string) (int64, error) {
 	var orderId int64
 
-	if err := o.db.Transaction(func(tx *gorm.DB) error {
-		orderEntity, err := o.repo.GetOrderByOrderCode(ctx, orderCode, 0, tx)
+	if err := o.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		orderEntity, err := o.cacheOrder.GetOrderByOrderCode(txCtx, orderCode, 0)
 		if err != nil {
 			return err
 		}
@@ -69,31 +84,40 @@ func (o *orderService) GetOrderIdByOrderCodePublic(ctx context.Context, orderCod
 func (o *orderService) GetBatchOrders(ctx context.Context, orderIds []int64, jwtUserData entity.JwtUserData, userData string) ([]entity.OrderEntity, error) {
 	var orders []entity.OrderEntity
 
-	if err := o.db.Transaction(func(tx *gorm.DB) error {
-		if strings.ToLower(jwtUserData.RoleName) == "customer" {
-			orderEntities, err := o.repo.GetBatchOrders(ctx, orderIds, jwtUserData.UserID, tx)
+	if err := o.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		switch strings.ToLower(jwtUserData.RoleName) {
+		case "customer": // requested by customer
+			orderEntities, err := o.repo.GetBatchOrders(txCtx, orderIds, jwtUserData.UserID)
 			if err != nil {
 				return err
 			}
 
-			if err := o.getAllProductsUser(ctx, orderEntities, userData); err != nil {
+			if err := o.getAllProductsUser(txCtx, orderEntities, userData); err != nil {
+				if err.Error() == utils.DATA_NOT_FOUND {
+					err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+					return err
+				}
 				return err
 			}
 
 			orders = orderEntities
 
-			return nil
-		}
-		orderEntities, err := o.repo.GetBatchOrders(ctx, orderIds, 0, tx)
-		if err != nil {
-			return err
-		}
+		default: // requested by admin
+			orderEntities, err := o.repo.GetBatchOrders(txCtx, orderIds, 0)
+			if err != nil {
+				return err
+			}
 
-		if err := o.getAllProductsUsersAdmin(ctx, orderEntities, userData); err != nil {
-			return err
-		}
+			if err := o.getAllProductsUsersAdmin(txCtx, orderEntities, userData); err != nil {
+				if err.Error() == utils.DATA_NOT_FOUND {
+					err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+					return err
+				}
+				return err
+			}
 
-		orders = orderEntities
+			orders = orderEntities
+		}
 
 		return nil
 	}); err != nil {
@@ -108,36 +132,44 @@ func (o *orderService) GetBatchOrders(ctx context.Context, orderIds []int64, jwt
 func (o *orderService) GetOrderByOrderCode(ctx context.Context, orderCode string, jwtUserData entity.JwtUserData, userData string) (*entity.OrderEntity, error) {
 	order := &entity.OrderEntity{}
 
-	if err := o.db.Transaction(func(tx *gorm.DB) error {
-		if strings.ToLower(jwtUserData.RoleName) == "customer" {
-			orderEntity, err := o.repo.GetOrderByOrderCode(ctx, orderCode, jwtUserData.UserID, tx)
+	if err := o.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		switch strings.ToLower(jwtUserData.RoleName) {
+		case "customer":
+			orderEntity, err := o.cacheOrder.GetOrderByOrderCode(txCtx, orderCode, jwtUserData.UserID)
 			if err != nil {
 				return err
 			}
 
-			if err := o.getProductsUserById(ctx, orderEntity, userData); err != nil {
+			if err := o.getProductsUserById(txCtx, orderEntity, userData); err != nil {
+				if err.Error() == utils.DATA_NOT_FOUND {
+					err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+					return err
+				}
 				return err
 			}
 
 			order = orderEntity
 
-			return nil
-		}
+		default:
+			orderEntity, err := o.cacheOrder.GetOrderByOrderCode(txCtx, orderCode, 0)
+			if err != nil {
+				return err
+			}
 
-		orderEntity, err := o.repo.GetOrderByOrderCode(ctx, orderCode, 0, tx)
-		if err != nil {
-			return err
-		}
+			if err := o.getProductsUserByIdAdmin(txCtx, orderEntity, userData); err != nil {
+				if err.Error() == utils.DATA_NOT_FOUND {
+					err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+					return err
+				}
+				return err
+			}
 
-		if err := o.getProductsUserByIdAdmin(ctx, orderEntity, userData); err != nil {
-			return err
+			order = orderEntity
 		}
-
-		order = orderEntity
 
 		return nil
 	}); err != nil {
-		o.logger.Errorf("[OrderService-1] GetOrderByOrderCode: %v", err.Error())
+		o.logger.Errorf("[OrderService-1] GetOrderByOrderCode: %v", err)
 		return nil, err
 	}
 
@@ -146,41 +178,45 @@ func (o *orderService) GetOrderByOrderCode(ctx context.Context, orderCode string
 
 // UpdateOrderStatus implements [OrderServiceInterface].
 func (o *orderService) UpdateOrderStatus(ctx context.Context, req entity.OrderEntity, userData string) error {
-	publishEmailUpdateStatus := config.NewConfig().PublisherName.EmailUpdateOrderStatus
-	publishElasticUpdateStatus := config.NewConfig().PublisherName.OrderUpdateStatus
+	var (
+		publishEmailUpdateStatus   = o.cfg.PublisherName.EmailUpdateOrderStatus
+		publishElasticUpdateStatus = o.cfg.PublisherName.OrderUpdateStatus
+		outboxEventEntities        []entity.OutboxEventEntity
+	)
 
-	if err := o.db.Transaction(func(tx *gorm.DB) error {
-		orderEntity, err := o.repo.GetOrderById(ctx, req.ID, 0, tx)
+	if err := o.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		orderEntity, err := o.cacheOrder.GetOrderById(txCtx, req.ID, 0)
 		if err != nil {
 			return err
 		}
 
-		status := strings.ToLower(orderEntity.Status)
-		statusReq := strings.ToLower(req.Status)
+		statusReq := strings.ToUpper(req.Status)
 
-		if statusReq != "cancelled" {
-			err := errors.New(utils.INVALID_STATUS_TRANSITION)
-
+		if statusReq != "CANCELED" {
 			nextStatus := map[string]string{
-				"pending":   "confirmed",
-				"confirmed": "process",
-				"process":   "sending",
-				"sending":   "done",
+				"PENDING":   "CONFIRMED",
+				"CONFIRMED": "PROCESS",
+				"PROCESS":   "SENDING",
+				"SENDING":   "DONE",
 			}
 
-			if expected, ok := nextStatus[status]; ok && statusReq != expected {
+			if expected, ok := nextStatus[orderEntity.Status]; ok && statusReq != expected {
+				err := errors.New(utils.INVALID_STATUS_TRANSITION)
 				return err
 			}
 		}
 
-		orderEntity.Status = strings.ToUpper(req.Status)
+		orderEntity.Status = statusReq
 		orderEntity.Remarks = req.Remarks
 
-		if err := o.repo.UpdateOrderStatus(ctx, *orderEntity, tx); err != nil {
+		if err := o.repo.UpdateOrderStatus(txCtx, *orderEntity); err != nil {
 			return err
 		}
 
-		if err := o.getProductsUserByIdAdmin(ctx, orderEntity, userData); err != nil {
+		if err := o.getProductsUserByIdAdmin(txCtx, orderEntity, userData); err != nil {
+			if err.Error() == utils.DATA_NOT_FOUND {
+				err = errors.New(utils.RELATION_DATA_NOT_FOUND)
+			}
 			return err
 		}
 
@@ -194,9 +230,14 @@ func (o *orderService) UpdateOrderStatus(ctx context.Context, req entity.OrderEn
 			"receiver_id":       orderEntity.BuyerID,
 			"notification_type": "EMAIL",
 		}
-		if err := o.repoOutbox.CreateEvent(ctx, publishEmailUpdateStatus, publishEmailPayload, &orderEntity.ID, tx); err != nil {
-			return err
-		}
+
+		jsonEmailUpdateStatus, _ := json.Marshal(publishEmailPayload)
+
+		outboxEventEntities = append(outboxEventEntities, entity.OutboxEventEntity{
+			EventType:   publishEmailUpdateStatus,
+			Payload:     string(jsonEmailUpdateStatus),
+			AggregateID: fmt.Sprintf("%d", orderEntity.ID),
+		})
 
 		publishPushNotifPayload := map[string]any{
 			"receiver_email":    "",
@@ -206,22 +247,40 @@ func (o *orderService) UpdateOrderStatus(ctx context.Context, req entity.OrderEn
 			"receiver_id":       orderEntity.BuyerID,
 			"notification_type": "PUSH",
 		}
-		if err := o.repoOutbox.CreateEvent(ctx, utils.NOTIF_PUSH, publishPushNotifPayload, &orderEntity.ID, tx); err != nil {
-			return err
-		}
+
+		jsonPushNotif, _ := json.Marshal(publishPushNotifPayload)
+
+		outboxEventEntities = append(outboxEventEntities, entity.OutboxEventEntity{
+			EventType:   utils.NOTIF_PUSH,
+			Payload:     string(jsonPushNotif),
+			AggregateID: fmt.Sprintf("%d", orderEntity.ID),
+		})
 
 		publishElasticPayload := map[string]any{
 			"id":      orderEntity.ID,
 			"status":  orderEntity.Status,
 			"remarks": orderEntity.Remarks,
 		}
-		if err := o.repoOutbox.CreateEvent(ctx, publishElasticUpdateStatus, publishElasticPayload, &orderEntity.ID, tx); err != nil {
+
+		jsonElasticUpdate, _ := json.Marshal(publishElasticPayload)
+
+		outboxEventEntities = append(outboxEventEntities, entity.OutboxEventEntity{
+			EventType:   publishElasticUpdateStatus,
+			Payload:     string(jsonElasticUpdate),
+			AggregateID: fmt.Sprintf("%d", orderEntity.ID),
+		})
+
+		if err := o.repoOutbox.CreateBatchEvents(txCtx, outboxEventEntities); err != nil {
+			return err
+		}
+
+		if err := o.cacheOrder.DeleteOrderCache(txCtx, orderEntity.ID, orderEntity.OrderCode); err != nil {
 			return err
 		}
 
 		return nil
 	}); err != nil {
-		o.logger.Errorf("[OrderService-1] UpdateOrderStatus: %v", err.Error())
+		o.logger.Errorf("[OrderService-1] UpdateOrderStatus: %v", err)
 		return err
 	}
 
@@ -230,10 +289,12 @@ func (o *orderService) UpdateOrderStatus(ctx context.Context, req entity.OrderEn
 
 // CreateOrder implements [OrderServiceInterface].
 func (o *orderService) CreateOrder(ctx context.Context, req entity.OrderEntity, userData string) (int64, string, error) {
-	publishUpdateStock := config.NewConfig().PublisherName.ProductUpdateStock
-	publishOrderCreate := config.NewConfig().PublisherName.OrderCreate
-
-	orderId := int64(0)
+	var (
+		publishUpdateStock  = o.cfg.PublisherName.ProductUpdateStock
+		publishOrderCreate  = o.cfg.PublisherName.OrderCreate
+		outboxEventEntities []entity.OutboxEventEntity
+		orderId             int64
+	)
 
 	req.OrderCode = conv.GenerateOrderCode()
 	shippingFee := 0
@@ -243,24 +304,37 @@ func (o *orderService) CreateOrder(ctx context.Context, req entity.OrderEntity, 
 	req.ShippingFee = int64(shippingFee)
 	req.Status = "PENDING"
 
-	if err := o.db.Transaction(func(tx *gorm.DB) error {
-		id, err := o.repo.CreateOrder(ctx, req, tx)
+	if err := o.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		orderIdCreated, err := o.repo.CreateOrder(txCtx, req)
 		if err != nil {
 			return err
 		}
 
-		orderEntity, err := o.repo.GetOrderById(ctx, id, 0, tx)
+		orderId = orderIdCreated
+
+		if err := o.cacheOrder.DeleteOrderCache(txCtx, orderIdCreated, ""); err != nil {
+			return err
+		}
+
+		orderEntity, err := o.cacheOrder.GetOrderById(txCtx, orderIdCreated, 0)
 		if err != nil {
 			return err
 		}
 
-		if err := o.getProductsUserById(ctx, orderEntity, userData); err != nil {
+		if err := o.getProductsUserById(txCtx, orderEntity, userData); err != nil {
+			if err.Error() == utils.DATA_NOT_FOUND {
+				err = errors.New(utils.RELATION_DATA_NOT_FOUND)
+			}
 			return err
 		}
 
-		if err := o.repoOutbox.CreateEvent(ctx, publishOrderCreate, orderEntity, &id, tx); err != nil {
-			return err
-		}
+		jsonOrderCreate, _ := json.Marshal(orderEntity)
+
+		outboxEventEntities = append(outboxEventEntities, entity.OutboxEventEntity{
+			EventType:   publishOrderCreate,
+			Payload:     string(jsonOrderCreate),
+			AggregateID: fmt.Sprintf("%d", orderIdCreated),
+		})
 
 		publishPayload := make([]any, 0, len(orderEntity.OrderItems))
 		for _, oi := range orderEntity.OrderItems {
@@ -271,15 +345,22 @@ func (o *orderService) CreateOrder(ctx context.Context, req entity.OrderEntity, 
 			publishPayload = append(publishPayload, orderItem)
 		}
 
-		if err := o.repoOutbox.CreateEvent(ctx, publishUpdateStock, publishPayload, nil, tx); err != nil {
+		jsonUpdateStock, _ := json.Marshal(publishPayload)
+
+		outboxEventEntities = append(outboxEventEntities, entity.OutboxEventEntity{
+			EventType:   publishUpdateStock,
+			Payload:     string(jsonUpdateStock),
+			AggregateID: "",
+		})
+
+		if err := o.repoOutbox.CreateBatchEvents(txCtx, outboxEventEntities); err != nil {
 			return err
 		}
 
-		orderId = id
-
 		return nil
 	}); err != nil {
-		o.logger.Errorf("[OrderService-1] CreateOrder: %v", err.Error())
+		o.cacheOrder.DeleteOrderCache(ctx, orderId, "")
+		o.logger.Errorf("[OrderService-1] CreateOrder: %v", err)
 		return 0, "", err
 	}
 
@@ -293,8 +374,8 @@ func (o *orderService) GetAllOrders(ctx context.Context, query entity.OrderQuery
 		return orders, countData, totalPages, nil
 	}
 
-	if err := o.db.Transaction(func(tx *gorm.DB) error {
-		orderEntities, count, pages, err := o.repo.GetAllOrders(ctx, query, tx)
+	if err := o.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		orderEntities, count, pages, err := o.repo.GetAllOrders(txCtx, query)
 		if err != nil {
 			return err
 		}
@@ -303,7 +384,11 @@ func (o *orderService) GetAllOrders(ctx context.Context, query entity.OrderQuery
 			return nil
 		}
 
-		if err := o.getAllProductsUser(ctx, orderEntities, userData); err != nil {
+		if err := o.getAllProductsUser(txCtx, orderEntities, userData); err != nil {
+			if err.Error() == utils.DATA_NOT_FOUND {
+				err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+				return err
+			}
 			return err
 		}
 
@@ -311,7 +396,7 @@ func (o *orderService) GetAllOrders(ctx context.Context, query entity.OrderQuery
 
 		return nil
 	}); err != nil {
-		o.logger.Errorf("[OrderService-1] GetAllOrders: %v", err.Error())
+		o.logger.Errorf("[OrderService-1] GetAllOrders: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -322,13 +407,17 @@ func (o *orderService) GetAllOrders(ctx context.Context, query entity.OrderQuery
 func (o *orderService) GetOrderById(ctx context.Context, orderId int64, userId int64, userData string) (*entity.OrderEntity, error) {
 	order := &entity.OrderEntity{}
 
-	if err := o.db.Transaction(func(tx *gorm.DB) error {
-		orderEntity, err := o.repo.GetOrderById(ctx, orderId, userId, tx)
+	if err := o.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		orderEntity, err := o.cacheOrder.GetOrderById(txCtx, orderId, userId)
 		if err != nil {
 			return err
 		}
 
-		if err := o.getProductsUserById(ctx, orderEntity, userData); err != nil {
+		if err := o.getProductsUserById(txCtx, orderEntity, userData); err != nil {
+			if err.Error() == utils.DATA_NOT_FOUND {
+				err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+				return err
+			}
 			return err
 		}
 
@@ -336,7 +425,7 @@ func (o *orderService) GetOrderById(ctx context.Context, orderId int64, userId i
 
 		return nil
 	}); err != nil {
-		o.logger.Errorf("[OrderService-1] GetOrderById: %v", err.Error())
+		o.logger.Errorf("[OrderService-1] GetOrderById: %v", err)
 		return nil, err
 	}
 
@@ -347,13 +436,17 @@ func (o *orderService) GetOrderById(ctx context.Context, orderId int64, userId i
 func (o *orderService) GetOrderByIdAdmin(ctx context.Context, orderId int64, userData string) (*entity.OrderEntity, error) {
 	order := &entity.OrderEntity{}
 
-	if err := o.db.Transaction(func(tx *gorm.DB) error {
-		orderEntity, err := o.repo.GetOrderById(ctx, orderId, 0, tx)
+	if err := o.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		orderEntity, err := o.cacheOrder.GetOrderById(txCtx, orderId, 0)
 		if err != nil {
 			return err
 		}
 
-		if err := o.getProductsUserByIdAdmin(ctx, orderEntity, userData); err != nil {
+		if err := o.getProductsUserByIdAdmin(txCtx, orderEntity, userData); err != nil {
+			if err.Error() == utils.DATA_NOT_FOUND {
+				err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+				return err
+			}
 			return err
 		}
 
@@ -361,7 +454,7 @@ func (o *orderService) GetOrderByIdAdmin(ctx context.Context, orderId int64, use
 
 		return nil
 	}); err != nil {
-		o.logger.Errorf("[OrderService-1] GetOrderByIdAdmin: %v", err.Error())
+		o.logger.Errorf("[OrderService-1] GetOrderByIdAdmin: %v", err)
 		return nil, err
 	}
 
@@ -375,8 +468,8 @@ func (o *orderService) GetAllOrdersAdmin(ctx context.Context, query entity.Order
 		return orders, countData, totalPages, nil
 	}
 
-	if err := o.db.Transaction(func(tx *gorm.DB) error {
-		orderEntities, count, pages, err := o.repo.GetAllOrders(ctx, query, tx)
+	if err := o.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		orderEntities, count, pages, err := o.repo.GetAllOrders(txCtx, query)
 		if err != nil {
 			return err
 		}
@@ -385,7 +478,11 @@ func (o *orderService) GetAllOrdersAdmin(ctx context.Context, query entity.Order
 			return nil
 		}
 
-		if err := o.getAllProductsUsersAdmin(ctx, orderEntities, userData); err != nil {
+		if err := o.getAllProductsUsersAdmin(txCtx, orderEntities, userData); err != nil {
+			if err.Error() == utils.DATA_NOT_FOUND {
+				err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+				return err
+			}
 			return err
 		}
 
@@ -393,7 +490,7 @@ func (o *orderService) GetAllOrdersAdmin(ctx context.Context, query entity.Order
 
 		return nil
 	}); err != nil {
-		o.logger.Errorf("[OrderService-1] GetAllOrdersAdmin: %v", err.Error())
+		o.logger.Errorf("[OrderService-1] GetAllOrdersAdmin: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -646,15 +743,4 @@ func (o *orderService) getProductsUserById(ctx context.Context, order *entity.Or
 	}
 
 	return nil
-}
-
-func NewOrderService(repo repository.OrderRepositoryInterface, repoOutbox repository.OutboxEventInterface, repoElastic repository.ElasticRepositoryInterface, httpService HttpServiceInterface, db *gorm.DB, logger *log.Logger) OrderServiceInterface {
-	return &orderService{
-		repo:        repo,
-		httpService: httpService,
-		db:          db,
-		logger:      logger,
-		repoOutbox:  repoOutbox,
-		repoElastic: repoElastic,
-	}
 }

@@ -15,22 +15,71 @@ import (
 )
 
 type OutboxEventInterface interface {
-	CreateEvent(ctx context.Context, publishName string, payload any, orderId *int64, db *gorm.DB) error
-	GetAllPendingEvent(ctx context.Context, db *gorm.DB) ([]entity.OutboxEventEntity, error)
-	UpdateFailedEvent(ctx context.Context, outboxIds []int64, db *gorm.DB) error
-	UpdatePublishedEvent(ctx context.Context, outboxIds []int64, db *gorm.DB) error
+	CreateEvent(ctx context.Context, publishName string, payload any, orderId *int64) error
+	CreateBatchEvents(ctx context.Context, outboxEvents []entity.OutboxEventEntity) error
+	GetAllPendingEvent(ctx context.Context) ([]entity.OutboxEventEntity, error)
+	UpdateFailedEvent(ctx context.Context, outboxIds []int64) error
+	UpdatePublishedEvent(ctx context.Context, outboxIds []int64) error
+
+	getDB(ctx context.Context) *gorm.DB
 }
 
 type outboxEventRepository struct {
+	db     *gorm.DB
 	logger *log.Logger
 }
 
+func NewOutboxEventRepository(db *gorm.DB, logger *log.Logger) OutboxEventInterface {
+	return &outboxEventRepository{
+		db:     db,
+		logger: logger,
+	}
+}
+
+// getDB implements [OutboxEventInterface].
+func (o *outboxEventRepository) getDB(ctx context.Context) *gorm.DB {
+	if tx, ok := ctx.Value(txKey{}).(*gorm.DB); ok {
+		return tx
+	}
+
+	return o.db
+}
+
+// CreateBatchEvents implements [OutboxEventInterface].
+func (o *outboxEventRepository) CreateBatchEvents(ctx context.Context, outboxEvents []entity.OutboxEventEntity) error {
+	var (
+		db            = o.getDB(ctx)
+		modelOutboxes []model.OutboxEvent
+		timeNow       = time.Now()
+	)
+
+	for _, event := range outboxEvents {
+		modelOutboxes = append(modelOutboxes, model.OutboxEvent{
+			EventType:   event.EventType,
+			AggregateID: event.AggregateID,
+			Payload:     event.Payload,
+			Status:      "PENDING",
+			NextRetryAt: &timeNow,
+		})
+	}
+
+	if err := db.WithContext(ctx).CreateInBatches(&modelOutboxes, 10).Error; err != nil {
+		o.logger.Errorf("[OutboxEventRepository-1] CreateBatchEvents: %v", err)
+		return err
+	}
+
+	return nil
+}
+
 // UpdateFailedEvent implements OutboxEventInterface.
-func (o *outboxEventRepository) UpdateFailedEvent(ctx context.Context, outboxIds []int64, db *gorm.DB) error {
-	outboxModels := []model.OutboxEvent{}
+func (o *outboxEventRepository) UpdateFailedEvent(ctx context.Context, outboxIds []int64) error {
+	var (
+		db           = o.getDB(ctx)
+		outboxModels []model.OutboxEvent
+	)
 
 	if err := db.WithContext(ctx).Where("id IN ?", outboxIds).Find(&outboxModels).Error; err != nil {
-		o.logger.Errorf("[OutboxEventRepository-1] UpdateFailedEvent: %v", err.Error())
+		o.logger.Errorf("[OutboxEventRepository-1] UpdateFailedEvent: %v", err)
 		return err
 	}
 
@@ -55,7 +104,7 @@ func (o *outboxEventRepository) UpdateFailedEvent(ctx context.Context, outboxIds
 	}
 
 	if err := db.WithContext(ctx).Save(&updatedOutbox).Error; err != nil {
-		o.logger.Errorf("[OutboxEventRepository-2] UpdateFailedEvent: %v", err.Error())
+		o.logger.Errorf("[OutboxEventRepository-2] UpdateFailedEvent: %v", err)
 		return err
 	}
 
@@ -63,11 +112,14 @@ func (o *outboxEventRepository) UpdateFailedEvent(ctx context.Context, outboxIds
 }
 
 // UpdatePublishedEvent implements OutboxEventInterface.
-func (o *outboxEventRepository) UpdatePublishedEvent(ctx context.Context, outboxIds []int64, db *gorm.DB) error {
-	outboxModels := []model.OutboxEvent{}
+func (o *outboxEventRepository) UpdatePublishedEvent(ctx context.Context, outboxIds []int64) error {
+	var (
+		db           = o.getDB(ctx)
+		outboxModels []model.OutboxEvent
+	)
 
 	if err := db.WithContext(ctx).Where("id IN ?", outboxIds).Find(&outboxModels).Error; err != nil {
-		o.logger.Errorf("[OutboxEventRepository-1] UpdatePublishedEvent: %v", err.Error())
+		o.logger.Errorf("[OutboxEventRepository-1] UpdatePublishedEvent: %v", err)
 		return err
 	}
 
@@ -80,7 +132,7 @@ func (o *outboxEventRepository) UpdatePublishedEvent(ctx context.Context, outbox
 	}
 
 	if err := db.WithContext(ctx).Save(&updatedOutbox).Error; err != nil {
-		o.logger.Errorf("[OutboxEventRepository-2] UpdatePublishedEvent: %v", err.Error())
+		o.logger.Errorf("[OutboxEventRepository-2] UpdatePublishedEvent: %v", err)
 		return err
 	}
 
@@ -88,15 +140,18 @@ func (o *outboxEventRepository) UpdatePublishedEvent(ctx context.Context, outbox
 }
 
 // GetAllPendingEvent implements OutboxEventInterface.
-func (o *outboxEventRepository) GetAllPendingEvent(ctx context.Context, db *gorm.DB) ([]entity.OutboxEventEntity, error) {
-	outboxModels := []model.OutboxEvent{}
-	outboxEntities := []entity.OutboxEventEntity{}
+func (o *outboxEventRepository) GetAllPendingEvent(ctx context.Context) ([]entity.OutboxEventEntity, error) {
+	var (
+		db             = o.getDB(ctx)
+		outboxModels   []model.OutboxEvent
+		outboxEntities []entity.OutboxEventEntity
+	)
 
 	if err := db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 		Where("status = ? AND next_retry_at <= ?", "PENDING", time.Now()).
 		Limit(10).
 		Find(&outboxModels).Error; err != nil {
-		o.logger.Errorf("[OutboxEventRepository-1] GetAllPendingEvent: %v", err.Error())
+		o.logger.Errorf("[OutboxEventRepository-1] GetAllPendingEvent: %v", err)
 		return nil, err
 	}
 
@@ -123,7 +178,7 @@ func (o *outboxEventRepository) GetAllPendingEvent(ctx context.Context, db *gorm
 	}
 
 	if err := db.WithContext(ctx).Save(&updatedOutbox).Error; err != nil {
-		o.logger.Errorf("[OutboxEventRepository-2] GetAllPendingEvent: %v", err.Error())
+		o.logger.Errorf("[OutboxEventRepository-2] GetAllPendingEvent: %v", err)
 		return nil, err
 	}
 
@@ -132,7 +187,9 @@ func (o *outboxEventRepository) GetAllPendingEvent(ctx context.Context, db *gorm
 }
 
 // CreateEvent implements OutboxEventInterface.
-func (o *outboxEventRepository) CreateEvent(ctx context.Context, publishName string, payload any, orderId *int64, db *gorm.DB) error {
+func (o *outboxEventRepository) CreateEvent(ctx context.Context, publishName string, payload any, orderId *int64) error {
+	var db = o.getDB(ctx)
+
 	parsedPayload, _ := json.Marshal(payload)
 
 	timeNow := time.Now()
@@ -153,15 +210,9 @@ func (o *outboxEventRepository) CreateEvent(ctx context.Context, publishName str
 	}
 
 	if err := db.WithContext(ctx).Create(&outboxModel).Error; err != nil {
-		o.logger.Errorf("[OutboxEventRepository-1] CreateEvent: %v", err.Error())
+		o.logger.Errorf("[OutboxEventRepository-1] CreateEvent: %v", err)
 		return err
 	}
 
 	return nil
-}
-
-func NewOutboxEventRepository(logger *log.Logger) OutboxEventInterface {
-	return &outboxEventRepository{
-		logger: logger,
-	}
 }

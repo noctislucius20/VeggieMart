@@ -137,8 +137,14 @@ func (h *httpService) HttpUsersAllAdminService(userIds []int64, userData string)
 	}
 
 	if userFetch.StatusCode != 200 {
-		err := errors.New(strconv.Itoa(userFetch.StatusCode))
-		return nil, err
+		switch userFetch.StatusCode {
+		case 404:
+			err := errors.New(utils.DATA_NOT_FOUND)
+			return nil, err
+		default:
+			err := errors.New(utils.INTERNAL_SERVER_ERROR)
+			return nil, err
+		}
 	}
 
 	body, err := io.ReadAll(userFetch.Body)
@@ -182,8 +188,14 @@ func (h *httpService) HttpProductsAllService(productIds []int64, userData string
 	}
 
 	if productsFetch.StatusCode != 200 {
-		err := errors.New(strconv.Itoa(productsFetch.StatusCode))
-		return nil, err
+		switch productsFetch.StatusCode {
+		case 404:
+			err := errors.New(utils.DATA_NOT_FOUND)
+			return nil, err
+		default:
+			err := errors.New(utils.INTERNAL_SERVER_ERROR)
+			return nil, err
+		}
 	}
 
 	body, err := io.ReadAll(productsFetch.Body)

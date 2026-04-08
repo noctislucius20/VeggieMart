@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
@@ -38,6 +39,35 @@ type orderHandler struct {
 	orderService service.OrderServiceInterface
 }
 
+func NewOrderHandler(e *echo.Echo, cfg *config.Config, orderService service.OrderServiceInterface, jwtService service.JwtServiceInterface, redisClient *redis.Client) OrderHandlerInterface {
+	orderHandler := &orderHandler{
+		orderService: orderService,
+	}
+
+	e.Use(middleware.Recover())
+	e.Use(middleware.ContextTimeoutWithConfig(middleware.ContextTimeoutConfig{
+		Timeout: 10 * time.Second,
+	}))
+
+	mid := adapter.NewMiddlewareAdapter(cfg, logger.NewLogger().Logger(), jwtService, redisClient)
+
+	e.GET("/public/orders/:orderCode/code", orderHandler.GetOrderIdByOrderCodePublic)
+
+	authGroup := e.Group("/auth", mid.CheckToken())
+	authGroup.POST("/orders", orderHandler.CreateOrder, mid.DistanceCheck())
+	authGroup.GET("/orders", orderHandler.GetAllOrders)
+	authGroup.POST("/orders/batch", orderHandler.GetBatchOrders)
+	authGroup.GET("/orders/:id", orderHandler.GetOrderById)
+	authGroup.GET("/orders/:orderCode/code", orderHandler.GetOrderByOrderCode)
+
+	adminGroup := e.Group("/admin", mid.CheckToken())
+	adminGroup.GET("/orders", orderHandler.GetAllOrdersAdmin)
+	adminGroup.GET("/orders/:id", orderHandler.GetOrderByIdAdmin)
+	adminGroup.PUT("/orders/:id/status", orderHandler.UpdateOrderStatusByAdmin)
+
+	return orderHandler
+}
+
 // GetOrderIdByOrderCodePublic implements [OrderHandlerInterface].
 func (o *orderHandler) GetOrderIdByOrderCodePublic(c echo.Context) error {
 	var (
@@ -52,11 +82,13 @@ func (o *orderHandler) GetOrderIdByOrderCodePublic(c echo.Context) error {
 
 	result, err := o.orderService.GetOrderIdByOrderCodePublic(ctx, orderCodeParam)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-2] GetOrderIdByOrderCodePublic: %v", err.Error())
-		if err.Error() == utils.DATA_NOT_FOUND {
+		c.Logger().Errorf("[OrderHandler-2] GetOrderIdByOrderCodePublic: %v", err)
+		switch err.Error() {
+		case utils.DATA_NOT_FOUND:
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
+		default:
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 		}
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 	}
 
 	respOrder := map[string]int64{
@@ -99,10 +131,14 @@ func (o *orderHandler) GetBatchOrders(c echo.Context) error {
 	results, err := o.orderService.GetBatchOrders(ctx, req.IDOrders, jwtUserData, user)
 	if err != nil {
 		c.Logger().Errorf("[OrderHandler-5] GetBatchOrders: %v", err)
-		if err.Error() == utils.DATA_NOT_FOUND {
-			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.DATA_NOT_FOUND))
+		switch err.Error() {
+		case utils.DATA_NOT_FOUND:
+			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
+		case utils.RELATION_DATA_NOT_FOUND:
+			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
+		default:
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 		}
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
 	}
 
 	for _, result := range results {
@@ -155,11 +191,15 @@ func (o *orderHandler) GetOrderById(c echo.Context) error {
 
 	result, err := o.orderService.GetOrderById(ctx, id, userId, user)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-5] GetOrderById: %v", err.Error())
-		if err.Error() == utils.DATA_NOT_FOUND {
+		c.Logger().Errorf("[OrderHandler-5] GetOrderById: %v", err)
+		switch err.Error() {
+		case utils.DATA_NOT_FOUND:
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
+		case utils.RELATION_DATA_NOT_FOUND:
+			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
+		default:
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 		}
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 	}
 
 	respOrder = response.OrderDetailResponse{
@@ -219,11 +259,15 @@ func (o *orderHandler) GetOrderByOrderCode(c echo.Context) error {
 
 	result, err := o.orderService.GetOrderByOrderCode(ctx, orderCode, jwtUserData, user)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-4] GetOrderByOrderCode: %v", err.Error())
-		if err.Error() == utils.DATA_NOT_FOUND {
+		c.Logger().Errorf("[OrderHandler-4] GetOrderByOrderCode: %v", err)
+		switch err.Error() {
+		case utils.DATA_NOT_FOUND:
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
+		case utils.RELATION_DATA_NOT_FOUND:
+			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
+		default:
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 		}
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 	}
 
 	respOrder = response.OrderDetailResponse{
@@ -280,13 +324,13 @@ func (o *orderHandler) GetAllOrders(c echo.Context) error {
 
 	page, err := conv.ParseInt64QueryParam(c, "page", 1)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-3] GetAllOrders: %v", err.Error())
+		c.Logger().Errorf("[OrderHandler-3] GetAllOrders: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	limit, err := conv.ParseInt64QueryParam(c, "limit", 10)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-4] GetAllOrders: %v", err.Error())
+		c.Logger().Errorf("[OrderHandler-4] GetAllOrders: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -302,8 +346,13 @@ func (o *orderHandler) GetAllOrders(c echo.Context) error {
 
 	results, countData, totalPages, err := o.orderService.GetAllOrders(ctx, reqEntity, user)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-5] GetAllOrders: %v", err.Error())
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[OrderHandler-5] GetAllOrders: %v", err)
+		switch err.Error() {
+		case utils.RELATION_DATA_NOT_FOUND:
+			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
+		default:
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		}
 	}
 
 	for _, result := range results {
@@ -361,12 +410,12 @@ func (o *orderHandler) UpdateOrderStatusByAdmin(c echo.Context) error {
 	}
 
 	if err := c.Bind(&req); err != nil {
-		c.Logger().Errorf("[OrderHandler-4] UpdateOrderStatusByAdmin: %v", err.Error())
+		c.Logger().Errorf("[OrderHandler-4] UpdateOrderStatusByAdmin: %v", err)
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[OrderHandler-5] UpdateOrderStatusByAdmin: %v", err.Error())
+		c.Logger().Errorf("[OrderHandler-5] UpdateOrderStatusByAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -378,13 +427,16 @@ func (o *orderHandler) UpdateOrderStatusByAdmin(c echo.Context) error {
 
 	if err := o.orderService.UpdateOrderStatus(ctx, reqEntity, user); err != nil {
 		c.Logger().Errorf("[OrderHandler-6] UpdateOrderStatusByAdmin: %v", err)
-		if err.Error() == utils.DATA_NOT_FOUND {
-			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.DATA_NOT_FOUND))
+		switch err.Error() {
+		case utils.DATA_NOT_FOUND:
+			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
+		case utils.RELATION_DATA_NOT_FOUND:
+			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
+		case utils.INVALID_STATUS_TRANSITION:
+			return c.JSON(http.StatusConflict, response.ResponseFailed(err.Error()))
+		default:
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 		}
-		if err.Error() == utils.INVALID_STATUS_TRANSITION {
-			return c.JSON(http.StatusConflict, response.ResponseFailed(utils.INVALID_STATUS_TRANSITION))
-		}
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 	}
 
 	return c.JSON(http.StatusOK, response.ResponseSuccess(nil))
@@ -404,12 +456,12 @@ func (o *orderHandler) CreateOrder(c echo.Context) error {
 	}
 
 	if err := c.Bind(&req); err != nil {
-		c.Logger().Errorf("[OrderHandler-2] CreateOrder: %v", err.Error())
+		c.Logger().Errorf("[OrderHandler-2] CreateOrder: %v", err)
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[OrderHandler-3] CreateOrder: %v", err.Error())
+		c.Logger().Errorf("[OrderHandler-3] CreateOrder: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -433,8 +485,13 @@ func (o *orderHandler) CreateOrder(c echo.Context) error {
 
 	orderId, orderCode, err := o.orderService.CreateOrder(ctx, reqEntity, user)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-4] CreateOrder: %v", err.Error())
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[OrderHandler-4] CreateOrder: %v", err)
+		switch err.Error() {
+		case utils.RELATION_DATA_NOT_FOUND:
+			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
+		default:
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		}
 	}
 
 	respOrderId := map[string]any{
@@ -472,11 +529,15 @@ func (o *orderHandler) GetOrderByIdAdmin(c echo.Context) error {
 
 	result, err := o.orderService.GetOrderByIdAdmin(ctx, id, user)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-4] GetOrderByIdAdmin: %v", err.Error())
-		if err.Error() == utils.DATA_NOT_FOUND {
+		c.Logger().Errorf("[OrderHandler-4] GetOrderByIdAdmin: %v", err)
+		switch err.Error() {
+		case utils.DATA_NOT_FOUND:
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
+		case utils.RELATION_DATA_NOT_FOUND:
+			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
+		default:
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 		}
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 	}
 
 	respOrder = response.OrderDetailResponse{
@@ -525,13 +586,13 @@ func (o *orderHandler) GetAllOrdersAdmin(c echo.Context) error {
 
 	page, err := conv.ParseInt64QueryParam(c, "page", 1)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-2] GetAllOrdersAdmin: %v", err.Error())
+		c.Logger().Errorf("[OrderHandler-2] GetAllOrdersAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	limit, err := conv.ParseInt64QueryParam(c, "limit", 10)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-3] GetAllOrdersAdmin: %v", err.Error())
+		c.Logger().Errorf("[OrderHandler-3] GetAllOrdersAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -546,8 +607,13 @@ func (o *orderHandler) GetAllOrdersAdmin(c echo.Context) error {
 
 	results, countData, totalPages, err := o.orderService.GetAllOrdersAdmin(ctx, reqEntity, user)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-4] GetAllOrdersAdmin: %v", err.Error())
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[OrderHandler-4] GetAllOrdersAdmin: %v", err)
+		switch err.Error() {
+		case utils.RELATION_DATA_NOT_FOUND:
+			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
+		default:
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		}
 	}
 
 	for _, result := range results {
@@ -573,33 +639,4 @@ func (o *orderHandler) GetAllOrdersAdmin(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, response.ResponseWithPaginationsSuccess(respOrders, pagination))
-}
-
-func NewOrderHandler(orderService service.OrderServiceInterface, e *echo.Echo, cfg *config.Config) OrderHandlerInterface {
-	orderHandler := &orderHandler{
-		orderService: orderService,
-	}
-
-	e.Use(middleware.Recover())
-	e.Use(middleware.ContextTimeoutWithConfig(middleware.ContextTimeoutConfig{
-		Timeout: 10 * time.Second,
-	}))
-
-	mid := adapter.NewMiddlewareAdapter(cfg, logger.NewLogger().Logger())
-
-	e.GET("/public/orders/:orderCode/code", orderHandler.GetOrderIdByOrderCodePublic)
-
-	authGroup := e.Group("/auth", mid.CheckToken())
-	authGroup.POST("/orders", orderHandler.CreateOrder, mid.DistanceCheck())
-	authGroup.GET("/orders", orderHandler.GetAllOrders)
-	authGroup.POST("/orders/batch", orderHandler.GetBatchOrders)
-	authGroup.GET("/orders/:id", orderHandler.GetOrderById)
-	authGroup.GET("/orders/:orderCode/code", orderHandler.GetOrderByOrderCode)
-
-	adminGroup := e.Group("/admin", mid.CheckToken())
-	adminGroup.GET("/orders", orderHandler.GetAllOrdersAdmin)
-	adminGroup.GET("/orders/:id", orderHandler.GetOrderByIdAdmin)
-	adminGroup.PUT("/orders/:id/status", orderHandler.UpdateOrderStatusByAdmin)
-
-	return orderHandler
 }

@@ -7,9 +7,7 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-var ctx = context.Background()
-
-func (cfg Config) NewRedisClient() *redis.Client {
+func (cfg Config) NewRedisClient(ctx context.Context) (*redis.Client, error) {
 	connect := fmt.Sprintf("%s:%s", cfg.Redis.Host, cfg.Redis.Port)
 	client := redis.NewClient(&redis.Options{
 		Addr: connect,
@@ -17,8 +15,8 @@ func (cfg Config) NewRedisClient() *redis.Client {
 
 	_, err := client.Ping(ctx).Result()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	return client
+	return client, nil
 }

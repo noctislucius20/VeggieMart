@@ -6,6 +6,7 @@ import (
 	"order-service/internal/adapter/handler"
 	httpclient "order-service/internal/adapter/http_client"
 	"order-service/internal/adapter/repository"
+	"order-service/internal/adapter/repository/cache"
 	"order-service/internal/core/service"
 	"order-service/utils/logger"
 	"order-service/utils/validator"
@@ -28,7 +29,13 @@ func RunServer() {
 	cfg := config.NewConfig()
 	db, err := cfg.ConnectionPostgres(serviceCtx)
 	if err != nil {
-		customLogger.Logger().Fatalf("[RunServer-1] %v", err.Error())
+		customLogger.Logger().Fatalf("[RunServer-1] %v", err)
+		return
+	}
+
+	redisClient, err := cfg.NewRedisClient(serviceCtx)
+	if err != nil {
+		customLogger.Logger().Fatalf("[RunServer-2] %v", err)
 		return
 	}
 
@@ -49,20 +56,25 @@ func RunServer() {
 
 	esClient, err := cfg.NewElasticsearchClient()
 	if err != nil {
-		customLogger.Logger().Fatalf("[RunServer-3] %v", err.Error())
+		customLogger.Logger().Fatalf("[RunServer-3] %v", err)
 		return
 	}
 
 	httpClient := httpclient.NewHttpClient(cfg)
 
-	orderRepo := repository.NewOrderRepository(customLogger.Logger())
-	outboxRepo := repository.NewOutboxEventRepository(customLogger.Logger())
+	txManager := repository.NewGormTransactionManager(db.DB)
+
+	orderRepo := repository.NewOrderRepository(db.DB, customLogger.Logger())
+	outboxRepo := repository.NewOutboxEventRepository(db.DB, customLogger.Logger())
 	elasticRepo := repository.NewElasticRepository(esClient, customLogger.Logger())
 
-	httpService := service.NewHttpService(cfg, httpClient)
-	orderService := service.NewOrderService(orderRepo, outboxRepo, elasticRepo, httpService, db.DB, customLogger.Logger())
+	cacheOrder := cache.NewOrderCache(redisClient, orderRepo, customLogger.Logger())
 
-	handler.NewOrderHandler(orderService, e, cfg)
+	jwtService := service.NewJwtService(cfg)
+	httpService := service.NewHttpService(cfg, httpClient)
+	orderService := service.NewOrderService(cfg, orderRepo, outboxRepo, elasticRepo, cacheOrder, httpService, txManager, customLogger.Logger())
+
+	handler.NewOrderHandler(e, cfg, orderService, jwtService, redisClient)
 
 	e.GET("/api/check", func(c echo.Context) error {
 		return c.String(200, "OK")
@@ -75,7 +87,7 @@ func RunServer() {
 
 		err = e.Start(":" + cfg.App.AppPort)
 		if err != nil {
-			customLogger.Logger().Fatalf("[RunServer-4] %v", err.Error())
+			customLogger.Logger().Fatalf("[RunServer-4] %v", err)
 			return
 		}
 	}()
