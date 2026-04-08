@@ -56,7 +56,7 @@ func RunServer() {
 
 	esClient, err := cfg.NewElasticSearchClient()
 	if err != nil {
-		customLogger.Logger().Fatalf("[RunServer-2] %v", err.Error())
+		customLogger.Logger().Fatalf("[RunServer-3] %v", err)
 		return
 	}
 
@@ -67,13 +67,14 @@ func RunServer() {
 	categoryRepo := repository.NewCategoryRepository(db.DB, customLogger.Logger())
 	productRepo := repository.NewProductRepository(db.DB, esClient, customLogger.Logger())
 	outboxEventRepo := repository.NewOutboxEventRepository(db.DB, customLogger.Logger())
+	elasticRepo := repository.NewElasticRepository(esClient, customLogger.Logger())
 
 	cacheCategory := cache.NewCategoryCache(redisClient, categoryRepo, customLogger.Logger())
 	cacheProduct := cache.NewProductCache(redisClient, productRepo, customLogger.Logger())
 
 	jwtService := service.NewJwtService(cfg)
 	categoryService := service.NewCategoryService(categoryRepo, redisClient, cacheCategory, txManager, customLogger.Logger())
-	productService := service.NewProductService(cfg, productRepo, redisClient, cacheProduct, txManager, categoryService, outboxEventRepo, customLogger.Logger())
+	productService := service.NewProductService(cfg, productRepo, redisClient, cacheProduct, txManager, categoryService, outboxEventRepo, elasticRepo, customLogger.Logger())
 
 	handler.NewCategoryHandler(e, categoryService, cfg, jwtService, redisClient)
 	handler.NewProductHandler(e, cfg, productService, jwtService, redisClient)
@@ -90,7 +91,7 @@ func RunServer() {
 
 		err = e.Start(":" + cfg.App.AppPort)
 		if err != nil {
-			customLogger.Logger().Fatalf("[RunServer-3] %v", err.Error())
+			customLogger.Logger().Fatalf("[RunServer-3] %v", err)
 			return
 		}
 	}()

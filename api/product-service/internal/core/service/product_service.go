@@ -30,13 +30,14 @@ type productService struct {
 	redisClient     *redis.Client
 	categoryService CategoryServiceInterface
 	repoOutbox      repository.OutboxEventInterface
+	repoElastic     repository.ElasticRepositoryInterface
 	cacheProduct    cache.ProductCacheInterface
 	txManager       transaction.TransactionManager
 	logger          *log.Logger
 	cfg             *config.Config
 }
 
-func NewProductService(cfg *config.Config, repo repository.ProductRepositoryInterface, redisClient *redis.Client, cacheProduct cache.ProductCacheInterface, txManager transaction.TransactionManager, categoryService CategoryServiceInterface, repoOutbox repository.OutboxEventInterface, logger *log.Logger) ProductServiceInterface {
+func NewProductService(cfg *config.Config, repo repository.ProductRepositoryInterface, redisClient *redis.Client, cacheProduct cache.ProductCacheInterface, txManager transaction.TransactionManager, categoryService CategoryServiceInterface, repoOutbox repository.OutboxEventInterface, repoElastic repository.ElasticRepositoryInterface, logger *log.Logger) ProductServiceInterface {
 	return &productService{
 		cfg:             cfg,
 		repo:            repo,
@@ -45,6 +46,7 @@ func NewProductService(cfg *config.Config, repo repository.ProductRepositoryInte
 		txManager:       txManager,
 		categoryService: categoryService,
 		repoOutbox:      repoOutbox,
+		repoElastic:     repoElastic,
 		logger:          logger,
 	}
 }
@@ -149,7 +151,7 @@ func (p *productService) DeleteProduct(ctx context.Context, productId int64) err
 
 // GetAllProducts implements ProductServiceInterface.
 func (p *productService) GetAllProducts(ctx context.Context, query entity.QueryStringProduct) ([]entity.ProductEntity, int64, int64, error) {
-	products, countData, totalPages, err := p.repo.SearchProducts(ctx, query)
+	products, countData, totalPages, err := p.repoElastic.SearchProductElastic(ctx, query)
 	if err == nil {
 		if err := p.getAllProductsCategory(ctx, products); err != nil {
 			if err.Error() == utils.DATA_NOT_FOUND {
