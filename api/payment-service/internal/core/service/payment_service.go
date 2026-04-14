@@ -3,16 +3,18 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"payment-service/config"
 	httpclient "payment-service/internal/adapter/http_client"
 	"payment-service/internal/adapter/repository"
+	"payment-service/internal/adapter/repository/cache"
 	"payment-service/internal/core/domain/entity"
+	"payment-service/internal/core/service/transaction"
 	"payment-service/utils"
 	"strings"
 	"sync"
 
 	"github.com/labstack/gommon/log"
-	"gorm.io/gorm"
 )
 
 type PaymentServiceInterface interface {
@@ -26,48 +28,64 @@ type PaymentServiceInterface interface {
 }
 
 type paymentService struct {
-	repo        repository.PaymentRepositoryInterface
-	repoOutbox  repository.OutboxEventInterface
-	httpService HttpServiceInterface
-	midtrans    httpclient.MidtransClientInterface
-	cfg         *config.Config
-	db          *gorm.DB
-	logger      *log.Logger
+	repo         repository.PaymentRepositoryInterface
+	repoOutbox   repository.OutboxEventInterface
+	cachePayment cache.PaymentCacheInterface
+	httpService  HttpServiceInterface
+	midtrans     httpclient.MidtransClientInterface
+	txManager    transaction.TransactionManager
+	cfg          *config.Config
+	logger       *log.Logger
+}
+
+func NewPaymentService(repo repository.PaymentRepositoryInterface, repoOutbox repository.OutboxEventInterface, cachePayment cache.PaymentCacheInterface, cfg *config.Config, httpService HttpServiceInterface, midtrans httpclient.MidtransClientInterface, txManager transaction.TransactionManager, logger *log.Logger) PaymentServiceInterface {
+	return &paymentService{
+		repo:         repo,
+		repoOutbox:   repoOutbox,
+		cachePayment: cachePayment,
+		httpService:  httpService,
+		midtrans:     midtrans,
+		txManager:    txManager,
+		cfg:          cfg,
+		logger:       logger,
+	}
 }
 
 // GetPaymentById implements [PaymentServiceInterface].
 func (p *paymentService) GetPaymentById(ctx context.Context, paymentId uint, jwtUserData entity.JwtUserData, userData string) (*entity.PaymentEntity, error) {
 	payment := &entity.PaymentEntity{}
 
-	if err := p.db.Transaction(func(tx *gorm.DB) error {
-		if strings.ToLower(jwtUserData.RoleName) == "customer" {
-			paymentEntity, err := p.repo.GetPaymentById(ctx, paymentId, uint(jwtUserData.UserID), tx)
+	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		fmt.Println(jwtUserData.RoleName)
+		fmt.Println(jwtUserData.UserID)
+		switch strings.ToLower(jwtUserData.RoleName) {
+		case "customer": // requested by customer
+			paymentEntity, err := p.cachePayment.GetPaymentById(txCtx, paymentId, uint(jwtUserData.UserID))
 			if err != nil {
 				return err
 			}
 
-			if err := p.getByIdOrder(ctx, paymentEntity, userData); err != nil {
+			if err := p.getByIdOrder(txCtx, paymentEntity, userData); err != nil {
 				return err
 			}
 
 			payment = paymentEntity
+		default: // requested by admin
+			paymentEntity, err := p.cachePayment.GetPaymentById(txCtx, paymentId, 0)
+			if err != nil {
+				return err
+			}
 
-			return nil
-		}
-		paymentEntity, err := p.repo.GetPaymentById(ctx, paymentId, 0, tx)
-		if err != nil {
-			return err
-		}
+			if err := p.getByIdOrder(txCtx, paymentEntity, userData); err != nil {
+				return err
+			}
 
-		if err := p.getByIdOrder(ctx, paymentEntity, userData); err != nil {
-			return err
+			payment = paymentEntity
 		}
-
-		payment = paymentEntity
 
 		return nil
 	}); err != nil {
-		p.logger.Errorf("[PaymentService-1] GetPaymentById: %v", err.Error())
+		p.logger.Errorf("[PaymentService-1] GetPaymentById: %v", err)
 		return nil, err
 	}
 
@@ -82,8 +100,8 @@ func (p *paymentService) GetAllPayments(ctx context.Context, query entity.QueryS
 		totalPages int64
 	)
 
-	if err := p.db.Transaction(func(tx *gorm.DB) error {
-		paymentEntities, count, pages, err := p.repo.GetAllPayments(ctx, query, tx)
+	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		paymentEntities, count, pages, err := p.repo.GetAllPayments(txCtx, query)
 		if err != nil {
 			return err
 		}
@@ -92,7 +110,7 @@ func (p *paymentService) GetAllPayments(ctx context.Context, query entity.QueryS
 			return nil
 		}
 
-		if err := p.getAllOrders(ctx, paymentEntities, userData); err != nil {
+		if err := p.getAllOrders(txCtx, paymentEntities, userData); err != nil {
 			return err
 		}
 
@@ -100,7 +118,7 @@ func (p *paymentService) GetAllPayments(ctx context.Context, query entity.QueryS
 
 		return nil
 	}); err != nil {
-		p.logger.Errorf("[PaymentService-1] GetAllPayments: %v", err.Error())
+		p.logger.Errorf("[PaymentService-1] GetAllPayments: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -109,19 +127,24 @@ func (p *paymentService) GetAllPayments(ctx context.Context, query entity.QueryS
 
 // UpdateStatusByOrderCode implements [PaymentServiceInterface].
 func (p *paymentService) UpdateStatusByOrderCode(ctx context.Context, orderCode string, status string) error {
-	if err := p.db.Transaction(func(tx *gorm.DB) error {
+	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
 		orderId, err := p.httpService.HttpOrderIdByOrderCodePublicService(orderCode)
 		if err != nil {
 			return err
 		}
 
-		if err := p.repo.UpdateStatusByOrderCode(ctx, orderId, status, tx); err != nil {
+		paymentId, err := p.repo.UpdateStatusByOrderCode(txCtx, orderId, status)
+		if err != nil {
+			return err
+		}
+
+		if err := p.cachePayment.DeletePaymentCache(txCtx, int64(paymentId)); err != nil {
 			return err
 		}
 
 		return nil
 	}); err != nil {
-		p.logger.Errorf("[PaymentService-1] UpdateStatusByOrderCode: %v", err.Error())
+		p.logger.Errorf("[PaymentService-1] UpdateStatusByOrderCode: %v", err)
 		return err
 	}
 
@@ -132,21 +155,25 @@ func (p *paymentService) UpdateStatusByOrderCode(ctx context.Context, orderCode 
 func (p *paymentService) ProcessPayment(ctx context.Context, payment entity.PaymentEntity, userData string) (*entity.PaymentEntity, error) {
 	publishPaymentSuccess := p.cfg.PublisherName.PaymentSuccess
 
-	if err := p.db.Transaction(func(tx *gorm.DB) error {
+	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
 		switch strings.ToLower(payment.PaymentMethod) {
 		case "cod":
 			payment.PaymentStatus = "SUCCESS"
 
-			paymentId, paymentStatus, err := p.repo.CreatePayment(ctx, &payment, tx)
+			paymentId, paymentStatus, err := p.repo.CreatePayment(txCtx, &payment)
 			if err != nil {
 				return err
 			}
 
-			if err := p.repo.CreatePaymentLog(ctx, paymentId, paymentStatus, tx); err != nil {
+			if err := p.cachePayment.DeletePaymentCache(txCtx, int64(paymentId)); err != nil {
 				return err
 			}
 
-			// paymentEntity, err := p.repo.GetPaymentById(ctx, paymentId, 0, tx)
+			if err := p.repo.CreatePaymentLog(txCtx, paymentId, paymentStatus); err != nil {
+				return err
+			}
+
+			// paymentEntity, err := p.repo.GetPaymentById(txCtx, paymentId, 0)
 			// if err != nil {
 			// 	return err
 			// }
@@ -156,12 +183,13 @@ func (p *paymentService) ProcessPayment(ctx context.Context, payment entity.Paym
 				"payment_method": payment.PaymentMethod,
 			}
 
-			if err := p.repoOutbox.CreateEvent(ctx, publishPaymentSuccess, payloadPublish, &paymentId, tx); err != nil {
+			if err := p.repoOutbox.CreateEvent(txCtx, publishPaymentSuccess, payloadPublish, &paymentId); err != nil {
 				return err
 			}
 
+			payment.ID = paymentId
 		case "midtrans":
-			if err := p.getByIdOrder(ctx, &payment, userData); err != nil {
+			if err := p.getByIdOrder(txCtx, &payment, userData); err != nil {
 				return err
 			}
 
@@ -173,16 +201,20 @@ func (p *paymentService) ProcessPayment(ctx context.Context, payment entity.Paym
 			payment.PaymentStatus = "PENDING"
 			payment.PaymentGatewayID = transactionId
 
-			paymentId, paymentStatus, err := p.repo.CreatePayment(ctx, &payment, tx)
+			paymentId, paymentStatus, err := p.repo.CreatePayment(txCtx, &payment)
 			if err != nil {
 				return err
 			}
 
-			if err := p.repo.CreatePaymentLog(ctx, paymentId, paymentStatus, tx); err != nil {
+			if err := p.cachePayment.DeletePaymentCache(txCtx, int64(paymentId)); err != nil {
 				return err
 			}
 
-			// paymentEntity, err := p.repo.GetPaymentById(ctx, paymentId, 0, tx)
+			if err := p.repo.CreatePaymentLog(txCtx, paymentId, paymentStatus); err != nil {
+				return err
+			}
+
+			// paymentEntity, err := p.repo.GetPaymentById(txCtx, paymentId, 0)
 			// if err != nil {
 			// 	return err
 			// }
@@ -192,18 +224,18 @@ func (p *paymentService) ProcessPayment(ctx context.Context, payment entity.Paym
 				"payment_method": payment.PaymentMethod,
 			}
 
-			if err := p.repoOutbox.CreateEvent(ctx, publishPaymentSuccess, payloadPublish, &paymentId, tx); err != nil {
+			if err := p.repoOutbox.CreateEvent(txCtx, publishPaymentSuccess, payloadPublish, &paymentId); err != nil {
 				return err
 			}
 
+			payment.ID = paymentId
 		default:
-			err := errors.New(utils.INVALID_PAYMENT_METHOD)
-			return err
+			return errors.New(utils.INVALID_PAYMENT_METHOD)
 		}
 
 		return nil
 	}); err != nil {
-		p.logger.Errorf("[PaymentService-1] ProcessPayment: %v", err.Error())
+		p.logger.Errorf("[PaymentService-1] ProcessPayment: %v", err)
 		return nil, err
 	}
 
@@ -290,24 +322,4 @@ func (p *paymentService) getAllOrders(ctx context.Context, payments []entity.Pay
 	}
 
 	return nil
-}
-
-func NewPaymentService(
-	repo repository.PaymentRepositoryInterface,
-	repoOutbox repository.OutboxEventInterface,
-	cfg *config.Config,
-	httpService HttpServiceInterface,
-	midtrans httpclient.MidtransClientInterface,
-	db *gorm.DB,
-	logger *log.Logger,
-) PaymentServiceInterface {
-	return &paymentService{
-		repo:        repo,
-		repoOutbox:  repoOutbox,
-		httpService: httpService,
-		midtrans:    midtrans,
-		cfg:         cfg,
-		db:          db,
-		logger:      logger,
-	}
 }
