@@ -85,8 +85,15 @@ func NewUploadImageStorageHandler(e *echo.Echo, cfg *config.Config, jwtService s
 
 	mid := adapter.NewMiddlewareAdapter(cfg, logger.NewLogger().Logger(), jwtService, redisClient)
 
-	adminGroup := e.Group("/admin", mid.CheckToken())
-	adminGroup.POST("/image-upload", uploadImageHandler.UploadImage)
+	authPermission := []string{
+		"products:read:own",
+		"products:write:own",
+		"products:update:own",
+		"products:delete:own",
+	}
+
+	// adminGroup := e.Group("/admin", mid.CheckToken())
+	e.POST("/products/image-upload", uploadImageHandler.UploadImage, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 
 	return uploadImageHandler
 }

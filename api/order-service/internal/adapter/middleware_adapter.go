@@ -12,6 +12,7 @@ import (
 	"order-service/internal/core/service"
 	"order-service/utils"
 	"order-service/utils/conv"
+	"order-service/utils/helper"
 	"strings"
 
 	"github.com/go-redis/redis/v8"
@@ -22,6 +23,8 @@ import (
 type MiddlewareAdapterInterface interface {
 	CheckToken() echo.MiddlewareFunc
 	DistanceCheck() echo.MiddlewareFunc
+	RequiredPermission(requiredPermissions ...string) echo.MiddlewareFunc
+
 	haversineDistance(lat1 float64, lng1 float64, lat2 float64, lng2 float64) float64
 }
 
@@ -94,6 +97,58 @@ func (m *middlewareAdapter) DistanceCheck() echo.MiddlewareFunc {
 	}
 }
 
+// RequiredPermission implements [MiddlewareAdapterInterface].
+func (m *middlewareAdapter) RequiredPermission(requiredPermissions ...string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			var (
+				jwtUserData entity.JwtUserData
+				roleEntity  entity.RoleEntity
+				permissions []string
+				user        = c.Get("user").(string)
+			)
+
+			if user == "" {
+				err := errors.New(utils.TOKEN_INVALID)
+				m.logger.Errorf("[MiddlewareAdapter-1] RequiredPermission: %v", err)
+				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
+			}
+
+			if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
+				m.logger.Errorf("[MiddlewareAdapter-2] RequiredPermission: %v", err)
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			}
+
+			keyRolePermission := fmt.Sprintf("role:id:%d", jwtUserData.RoleID)
+			rolePermission, err := m.redisClient.Get(c.Request().Context(), keyRolePermission).Result()
+			if err != nil {
+				m.logger.Errorf("[MiddlewareAdapter-3] RequiredPermission: %v", err)
+				if errors.Is(err, redis.Nil) {
+					return c.JSON(http.StatusForbidden, response.ResponseFailed(utils.ACCESS_FORBIDDEN))
+				}
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			}
+
+			if err := json.Unmarshal([]byte(rolePermission), &roleEntity); err != nil {
+				m.logger.Errorf("[MiddlewareAdapter-4] RequiredPermission: %v", err)
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			}
+
+			for _, p := range roleEntity.Permissions {
+				permissions = append(permissions, fmt.Sprintf("%s:%s:%s", p.Resource, p.Action, p.Scope))
+			}
+
+			if allowed := helper.HasRequiredPermissions(permissions, requiredPermissions); !allowed {
+				err := errors.New(utils.ACCESS_FORBIDDEN)
+				m.logger.Errorf("[MiddlewareAdapter-5] RequiredPermission: %v", err)
+				return c.JSON(http.StatusForbidden, response.ResponseFailed(err.Error()))
+			}
+
+			return next(c)
+		}
+	}
+}
+
 // CheckToken implements MiddlewareAdapterInterface.
 func (m *middlewareAdapter) CheckToken() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -134,21 +189,21 @@ func (m *middlewareAdapter) CheckToken() echo.MiddlewareFunc {
 
 			c.Set("user", getSession)
 
-			jwtUserData := entity.JwtUserData{}
-			err = json.Unmarshal([]byte(getSession), &jwtUserData)
-			if err != nil {
-				m.logger.Errorf("[MiddlewareAdapter-5] CheckToken: %v", err)
-				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
-			}
+			// jwtUserData := entity.JwtUserData{}
+			// err = json.Unmarshal([]byte(getSession), &jwtUserData)
+			// if err != nil {
+			// 	m.logger.Errorf("[MiddlewareAdapter-5] CheckToken: %v", err)
+			// 	return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
+			// }
 
-			path := c.Request().URL.Path
-			segments := strings.Split(strings.Trim(path, "/"), "/")
+			// path := c.Request().URL.Path
+			// segments := strings.Split(strings.Trim(path, "/"), "/")
 
-			if strings.ToLower(jwtUserData.RoleName) == "customer" && segments[0] == "admin" {
-				err := errors.New(utils.ACCESS_FORBIDDEN)
-				m.logger.Errorf("[MiddlewareAdapter-6] CheckToken: %v", err)
-				return c.JSON(http.StatusForbidden, response.ResponseFailed(err.Error()))
-			}
+			// if strings.ToLower(jwtUserData.RoleName) == "customer" && segments[0] == "admin" {
+			// 	err := errors.New(utils.ACCESS_FORBIDDEN)
+			// 	m.logger.Errorf("[MiddlewareAdapter-6] CheckToken: %v", err)
+			// 	return c.JSON(http.StatusForbidden, response.ResponseFailed(err.Error()))
+			// }
 
 			return next(c)
 		}

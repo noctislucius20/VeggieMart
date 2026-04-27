@@ -53,17 +53,31 @@ func NewOrderHandler(e *echo.Echo, cfg *config.Config, orderService service.Orde
 
 	e.GET("/public/orders/:orderCode/code", orderHandler.GetOrderIdByOrderCodePublic)
 
-	authGroup := e.Group("/auth", mid.CheckToken())
-	authGroup.POST("/orders", orderHandler.CreateOrder, mid.DistanceCheck())
-	authGroup.GET("/orders", orderHandler.GetAllOrders)
-	authGroup.POST("/orders/batch", orderHandler.GetBatchOrders)
-	authGroup.GET("/orders/:id", orderHandler.GetOrderById)
-	authGroup.GET("/orders/:orderCode/code", orderHandler.GetOrderByOrderCode)
+	authPermission := []string{
+		"orders:read:own",
+		"orders:write:own",
+		"orders:update:own",
+		"orders:delete:own",
+	}
 
-	adminGroup := e.Group("/admin", mid.CheckToken())
-	adminGroup.GET("/orders", orderHandler.GetAllOrdersAdmin)
-	adminGroup.GET("/orders/:id", orderHandler.GetOrderByIdAdmin)
-	adminGroup.PUT("/orders/:id/status", orderHandler.UpdateOrderStatusByAdmin)
+	adminPermission := []string{
+		"orders:read:all",
+		"orders:write:all",
+		"orders:update:all",
+		"orders:delete:all",
+	}
+
+	// authGroup := e.Group("/auth", mid.CheckToken())
+	e.POST("/orders", orderHandler.CreateOrder, mid.CheckToken(), mid.RequiredPermission(authPermission...), mid.DistanceCheck())
+	e.GET("/orders", orderHandler.GetAllOrders, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	e.POST("/orders/batch", orderHandler.GetBatchOrders, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	e.GET("/orders/:id", orderHandler.GetOrderById, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	e.GET("/orders/:orderCode/code", orderHandler.GetOrderByOrderCode, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+
+	// adminGroup := e.Group("/admin", mid.CheckToken())
+	e.GET("/orders/admin", orderHandler.GetAllOrdersAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	e.GET("/orders/:id/admin", orderHandler.GetOrderByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	e.PUT("/orders/:id/status", orderHandler.UpdateOrderStatusByAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
 
 	return orderHandler
 }
@@ -77,7 +91,7 @@ func (o *orderHandler) GetOrderIdByOrderCodePublic(c echo.Context) error {
 	orderCodeParam := c.Param("orderCode")
 	if orderCodeParam == "" {
 		c.Logger().Errorf("[OrderHandler-1] GetOrderIdByOrderCodePublic: %v", "order code required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("order code required"))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ORDER_CODE_INVALID))
 	}
 
 	result, err := o.orderService.GetOrderIdByOrderCodePublic(ctx, orderCodeParam)
@@ -180,13 +194,13 @@ func (o *orderHandler) GetOrderById(c echo.Context) error {
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[OrderHandler-3] GetOrderById: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id required"))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
 		c.Logger().Errorf("[OrderHandler-4] GetOrderById: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id invalid"))
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	result, err := o.orderService.GetOrderById(ctx, id, userId, user)
@@ -243,7 +257,7 @@ func (o *orderHandler) GetOrderByOrderCode(c echo.Context) error {
 	user := c.Get("user").(string)
 	if user == "" {
 		c.Logger().Errorf("[OrderHandler-1] GetOrderByOrderCode: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
@@ -254,7 +268,7 @@ func (o *orderHandler) GetOrderByOrderCode(c echo.Context) error {
 	orderCode := c.Param("orderCode")
 	if orderCode == "" {
 		c.Logger().Errorf("[OrderHandler-3] GetOrderByOrderCode: %v", "order code required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("order code required"))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ORDER_CODE_INVALID))
 	}
 
 	result, err := o.orderService.GetOrderByOrderCode(ctx, orderCode, jwtUserData, user)
@@ -310,7 +324,7 @@ func (o *orderHandler) GetAllOrders(c echo.Context) error {
 	user := c.Get("user").(string)
 	if user == "" {
 		c.Logger().Errorf("[OrderHandler-1] GetAllOrders: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
@@ -394,19 +408,19 @@ func (o *orderHandler) UpdateOrderStatusByAdmin(c echo.Context) error {
 	user := c.Get("user").(string)
 	if user == "" {
 		c.Logger().Errorf("[OrderHandler-1] UpdateOrderStatusByAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[OrderHandler-2] UpdateOrderStatusByAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id required"))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
 		c.Logger().Errorf("[OrderHandler-3] UpdateOrderStatusByAdmin: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id invalid"))
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -512,19 +526,19 @@ func (o *orderHandler) GetOrderByIdAdmin(c echo.Context) error {
 	user := c.Get("user").(string)
 	if user == "" {
 		c.Logger().Errorf("[OrderHandler-1] GetOrderByIdAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[OrderHandler-2] GetOrderByIdAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id required"))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
 		c.Logger().Errorf("[OrderHandler-3] GetOrderByIdAdmin: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id invalid"))
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	result, err := o.orderService.GetOrderByIdAdmin(ctx, id, user)
@@ -579,7 +593,7 @@ func (o *orderHandler) GetAllOrdersAdmin(c echo.Context) error {
 	user := c.Get("user").(string)
 	if user == "" {
 		c.Logger().Errorf("[OrderHandler-1] GetAllOrdersAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
 	search := c.QueryParam("search")

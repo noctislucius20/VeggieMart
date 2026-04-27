@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"user-service/database/seeds"
+	permissionSeed "user-service/database/seeds/permission_seed"
 	"user-service/internal/core/domain/model"
 	customLogger "user-service/utils/logger"
 
@@ -46,12 +47,15 @@ func (cfg Config) ConnectionPostgres(ctx context.Context) (*Postgres, error) {
 		db.AutoMigrate(
 			&model.User{},
 			&model.Role{},
+			&model.Permission{},
 			&model.UserRole{},
+			&model.RolePermission{},
 			&model.VerificationToken{},
 			&model.OutboxEvent{},
 		)
 
-		seeds.SeedRole(db)
+		permissionSeed.SeedPermission(db)
+		seeds.SeedRole(ctx, db)
 		seeds.SeedAdmin(db)
 
 		sqlDB.SetMaxOpenConns(cfg.Psql.DBMaxOpen)

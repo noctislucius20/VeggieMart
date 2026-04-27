@@ -85,7 +85,12 @@ func (o *orderService) GetBatchOrders(ctx context.Context, orderIds []int64, jwt
 	var orders []entity.OrderEntity
 
 	if err := o.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		switch strings.ToLower(jwtUserData.RoleName) {
+		roleEntity, err := o.cacheOrder.GetRoleById(txCtx, jwtUserData.RoleID)
+		if err != nil {
+			return err
+		}
+
+		switch strings.ToLower(roleEntity.Name) {
 		case "customer": // requested by customer
 			orderEntities, err := o.repo.GetBatchOrders(txCtx, orderIds, jwtUserData.UserID)
 			if err != nil {
@@ -94,8 +99,7 @@ func (o *orderService) GetBatchOrders(ctx context.Context, orderIds []int64, jwt
 
 			if err := o.getAllProductsUser(txCtx, orderEntities, userData); err != nil {
 				if err.Error() == utils.DATA_NOT_FOUND {
-					err := errors.New(utils.RELATION_DATA_NOT_FOUND)
-					return err
+					return errors.New(utils.RELATION_DATA_NOT_FOUND)
 				}
 				return err
 			}
@@ -110,8 +114,7 @@ func (o *orderService) GetBatchOrders(ctx context.Context, orderIds []int64, jwt
 
 			if err := o.getAllProductsUsersAdmin(txCtx, orderEntities, userData); err != nil {
 				if err.Error() == utils.DATA_NOT_FOUND {
-					err := errors.New(utils.RELATION_DATA_NOT_FOUND)
-					return err
+					return errors.New(utils.RELATION_DATA_NOT_FOUND)
 				}
 				return err
 			}
@@ -133,7 +136,12 @@ func (o *orderService) GetOrderByOrderCode(ctx context.Context, orderCode string
 	order := &entity.OrderEntity{}
 
 	if err := o.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		switch strings.ToLower(jwtUserData.RoleName) {
+		roleEntity, err := o.cacheOrder.GetRoleById(txCtx, jwtUserData.RoleID)
+		if err != nil {
+			return err
+		}
+
+		switch strings.ToLower(roleEntity.Name) {
 		case "customer":
 			orderEntity, err := o.cacheOrder.GetOrderByOrderCode(txCtx, orderCode, jwtUserData.UserID)
 			if err != nil {
@@ -142,8 +150,7 @@ func (o *orderService) GetOrderByOrderCode(ctx context.Context, orderCode string
 
 			if err := o.getProductsUserById(txCtx, orderEntity, userData); err != nil {
 				if err.Error() == utils.DATA_NOT_FOUND {
-					err := errors.New(utils.RELATION_DATA_NOT_FOUND)
-					return err
+					return errors.New(utils.RELATION_DATA_NOT_FOUND)
 				}
 				return err
 			}
@@ -158,8 +165,7 @@ func (o *orderService) GetOrderByOrderCode(ctx context.Context, orderCode string
 
 			if err := o.getProductsUserByIdAdmin(txCtx, orderEntity, userData); err != nil {
 				if err.Error() == utils.DATA_NOT_FOUND {
-					err := errors.New(utils.RELATION_DATA_NOT_FOUND)
-					return err
+					return errors.New(utils.RELATION_DATA_NOT_FOUND)
 				}
 				return err
 			}
@@ -201,8 +207,7 @@ func (o *orderService) UpdateOrderStatus(ctx context.Context, req entity.OrderEn
 			}
 
 			if expected, ok := nextStatus[orderEntity.Status]; ok && statusReq != expected {
-				err := errors.New(utils.INVALID_STATUS_TRANSITION)
-				return err
+				return errors.New(utils.INVALID_STATUS_TRANSITION)
 			}
 		}
 
@@ -215,7 +220,7 @@ func (o *orderService) UpdateOrderStatus(ctx context.Context, req entity.OrderEn
 
 		if err := o.getProductsUserByIdAdmin(txCtx, orderEntity, userData); err != nil {
 			if err.Error() == utils.DATA_NOT_FOUND {
-				err = errors.New(utils.RELATION_DATA_NOT_FOUND)
+				return errors.New(utils.RELATION_DATA_NOT_FOUND)
 			}
 			return err
 		}

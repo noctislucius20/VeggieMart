@@ -40,12 +40,19 @@ func NewRoleHandler(e *echo.Echo, roleService service.RoleServiceInterface, cfg 
 
 	mid := adapter.NewMiddlewareAdapter(cfg, logger.NewLogger().Logger(), jwtService, redisClient)
 
-	adminGroup := e.Group("/admin", mid.CheckToken())
-	adminGroup.GET("/roles", roleHandler.GetRolesAllAdmin)
-	adminGroup.GET("/roles/:id", roleHandler.GetRoleByIdAdmin)
-	adminGroup.POST("/roles", roleHandler.CreateRoleAdmin)
-	adminGroup.PUT("/roles/:id", roleHandler.UpdateRoleAdmin)
-	adminGroup.DELETE("/roles/:id", roleHandler.DeleteRoleAdmin)
+	adminPermission := []string{
+		"roles:read:all",
+		"roles:write:all",
+		"roles:update:all",
+		"roles:delete:all",
+	}
+
+	// adminGroup := e.Group("/admin", mid.CheckToken())
+	e.GET("/roles", roleHandler.GetRolesAllAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	e.GET("/roles/:id", roleHandler.GetRoleByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	e.POST("/roles", roleHandler.CreateRoleAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	e.PUT("/roles/:id", roleHandler.UpdateRoleAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	e.DELETE("/roles/:id", roleHandler.DeleteRoleAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
 
 	return roleHandler
 }

@@ -17,6 +17,7 @@ import (
 
 type OrderCacheInterface interface {
 	GetOrderById(ctx context.Context, orderId int64, userId int64) (*entity.OrderEntity, error)
+	GetRoleById(ctx context.Context, id int64) (*entity.RoleEntity, error)
 	GetOrderByOrderCode(ctx context.Context, orderCode string, userId int64) (*entity.OrderEntity, error)
 	DeleteOrderCache(ctx context.Context, id int64, orderCode string) error
 }
@@ -33,6 +34,25 @@ func NewOrderCache(redisClient *redis.Client, repoOrder repository.OrderReposito
 		repoOrder:   repoOrder,
 		logger:      logger,
 	}
+}
+
+// GetRoleById implements [OrderCacheInterface].
+func (o *orderCache) GetRoleById(ctx context.Context, id int64) (*entity.RoleEntity, error) {
+	var roleEntity entity.RoleEntity
+
+	keyRolePermission := fmt.Sprintf("role:id:%d", id)
+	rolePermission, err := o.redisClient.Get(ctx, keyRolePermission).Result()
+	if err != nil {
+		o.logger.Errorf("[OrderCache-1] GetRoleById: %v", err)
+		if errors.Is(err, redis.Nil) {
+			return nil, errors.New(utils.RELATION_DATA_NOT_FOUND)
+		}
+		return nil, err
+	}
+
+	json.Unmarshal([]byte(rolePermission), &roleEntity)
+
+	return &roleEntity, nil
 }
 
 // GetOrderByOrderCode implements [OrderCacheInterface].

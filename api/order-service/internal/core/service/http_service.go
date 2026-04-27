@@ -26,7 +26,7 @@ type httpService struct {
 
 // HttpUserByIdService implements [HttpServiceInterface].
 func (h *httpService) HttpUserByIdService(userData string) (*entity.UserResponseEntity, error) {
-	baseUrlUser := fmt.Sprintf("%s%s", h.cfg.App.UserServiceUrl, "/auth/profile")
+	baseUrlUser := fmt.Sprintf("%s%s", h.cfg.App.UserServiceUrl, "/users/profile")
 
 	userDataEntity := entity.JwtUserData{}
 	if err := json.Unmarshal([]byte(userData), &userDataEntity); err != nil {
@@ -70,7 +70,7 @@ func (h *httpService) HttpUserByIdService(userData string) (*entity.UserResponse
 
 // HttpUserByIdAdminService implements [HttpServiceInterface].
 func (h *httpService) HttpUserByIdAdminService(userId int64, userData string) (*entity.UserResponseEntity, error) {
-	baseUrlUser := fmt.Sprintf("%s%s", h.cfg.App.UserServiceUrl, "/admin/customers/"+strconv.Itoa(int(userId)))
+	baseUrlUser := fmt.Sprintf("%s%s", h.cfg.App.UserServiceUrl, "/users/customers/"+strconv.Itoa(int(userId)))
 
 	userDataEntity := entity.JwtUserData{}
 	if err := json.Unmarshal([]byte(userData), &userDataEntity); err != nil {
@@ -114,7 +114,7 @@ func (h *httpService) HttpUserByIdAdminService(userId int64, userData string) (*
 
 // HttpUsersAllAdminService implements [HttpServiceInterface].
 func (h *httpService) HttpUsersAllAdminService(userIds []int64, userData string) (map[int64]entity.UserResponseEntity, error) {
-	baseUrlUser := fmt.Sprintf("%s%s", h.cfg.App.UserServiceUrl, "/admin/customers/batch")
+	baseUrlUser := fmt.Sprintf("%s%s", h.cfg.App.UserServiceUrl, "/users/customers/batch")
 
 	userDataEntity := entity.JwtUserData{}
 	if err := json.Unmarshal([]byte(userData), &userDataEntity); err != nil {
@@ -168,7 +168,7 @@ func (h *httpService) HttpUsersAllAdminService(userIds []int64, userData string)
 
 // HttpProductsAllService implements [HttpServiceInterface].
 func (h *httpService) HttpProductsAllService(productIds []int64, userData string) (map[int64]entity.ProductResponseEntity, error) {
-	baseUrlProducts := fmt.Sprintf("%s%s", h.cfg.App.ProductServiceUrl, "/auth/products/batch")
+	baseUrlProducts := fmt.Sprintf("%s%s", h.cfg.App.ProductServiceUrl, "/products/batch")
 
 	userDataEntity := entity.JwtUserData{}
 	if err := json.Unmarshal([]byte(userData), &userDataEntity); err != nil {

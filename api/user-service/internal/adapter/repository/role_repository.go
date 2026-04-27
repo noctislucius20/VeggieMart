@@ -133,7 +133,9 @@ func (r *roleRepository) GetRoleByIdOrName(ctx context.Context, id int64, name s
 		modelRole model.Role
 	)
 
-	if err := db.WithContext(ctx).Select("id", "name").
+	if err := db.Debug().WithContext(ctx).Select("id", "name").Preload("Permissions", func(db *gorm.DB) *gorm.DB {
+		return db.Select("id", "resource", "action", "scope")
+	}).
 		First(&modelRole, "id = ? OR name = ?", id, name).Error; err != nil {
 		r.logger.Errorf("[RoleRepository-1] GetRoleByIdOrName: %v", err)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -143,10 +145,21 @@ func (r *roleRepository) GetRoleByIdOrName(ctx context.Context, id int64, name s
 		return nil, err
 	}
 
-	return &entity.RoleEntity{
+	roleEntity := entity.RoleEntity{
 		ID:   modelRole.ID,
 		Name: modelRole.Name,
-	}, nil
+	}
+
+	for _, mp := range modelRole.Permissions {
+		roleEntity.Permissions = append(roleEntity.Permissions, entity.PermissionEntity{
+			ID:       mp.ID,
+			Resource: mp.Resource,
+			Action:   mp.Action,
+			Scope:    mp.Scope,
+		})
+	}
+
+	return &roleEntity, nil
 }
 
 // UpdateRole implements RoleRepositoryInterface.

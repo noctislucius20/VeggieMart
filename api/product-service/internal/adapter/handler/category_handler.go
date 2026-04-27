@@ -45,17 +45,24 @@ func NewCategoryHandler(e *echo.Echo, categoryService service.CategoryServiceInt
 
 	mid := adapter.NewMiddlewareAdapter(cfg, logger.NewLogger().Logger(), jwtService, redisClient)
 
-	homeCategory := e.Group("/categories")
-	homeCategory.GET("/shop", categoryHandler.GetAllCategoriesShop)
-	homeCategory.GET("/home", categoryHandler.GetAllCategoriesHome)
+	// categoryGroup := e.Group("/categories")
+	e.GET("/categories/shop", categoryHandler.GetAllCategoriesShop)
+	e.GET("/categories/home", categoryHandler.GetAllCategoriesHome)
 
-	adminGroup := e.Group("/admin", mid.CheckToken())
-	adminGroup.POST("/categories", categoryHandler.CreateCategoryAdmin)
-	adminGroup.GET("/categories", categoryHandler.GetAllCategoriesAdmin)
-	adminGroup.GET("/categories/:id", categoryHandler.GetCategoryByIdAdmin)
-	adminGroup.GET("/categories/:slug/slug", categoryHandler.GetCategoryBySlugAdmin)
-	adminGroup.PUT("/categories/:id", categoryHandler.UpdateCategoryAdmin)
-	adminGroup.DELETE("/categories/:id", categoryHandler.DeleteCategoryAdmin)
+	adminPermission := []string{
+		"categories:read:all",
+		"categories:write:all",
+		"categories:update:all",
+		"categories:delete:all",
+	}
+
+	// adminGroup := e.Group("/admin", mid.CheckToken())
+	e.POST("/categories", categoryHandler.CreateCategoryAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	e.GET("/categories", categoryHandler.GetAllCategoriesAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	e.GET("/categories/:id", categoryHandler.GetCategoryByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	e.GET("/categories/:slug/slug", categoryHandler.GetCategoryBySlugAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	e.PUT("/categories/:id", categoryHandler.UpdateCategoryAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	e.DELETE("/categories/:id", categoryHandler.DeleteCategoryAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
 
 	return categoryHandler
 }

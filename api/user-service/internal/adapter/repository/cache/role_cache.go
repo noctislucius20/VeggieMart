@@ -157,7 +157,7 @@ func (r *roleCache) GetRoleById(ctx context.Context, id int64) (*entity.RoleEnti
 
 	// Save to redis
 	jsonData, _ := json.Marshal(role)
-	if err := r.redisClient.Set(ctx, key, jsonData, 1*time.Hour).Err(); err != nil {
+	if err := r.redisClient.Set(ctx, key, jsonData, 0).Err(); err != nil {
 		r.logger.Errorf("[RoleCache-4] GetRoleById: %v", err)
 	}
 

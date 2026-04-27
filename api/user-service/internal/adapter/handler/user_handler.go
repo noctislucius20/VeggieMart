@@ -61,17 +61,31 @@ func NewUserHandler(e *echo.Echo, userService service.UserServiceInterface, cfg 
 	userGroup.GET("/activate-account", userHandler.ActivateAccount)
 	userGroup.PUT("/reset-password", userHandler.UpdatePassword)
 
-	adminGroup := e.Group("/admin", mid.CheckToken())
-	adminGroup.GET("/customers", userHandler.GetCustomersAllAdmin)
-	adminGroup.POST("/customers/batch", userHandler.GetBatchCustomersAdmin)
-	adminGroup.GET("/customers/:id", userHandler.GetCustomerByIdAdmin)
-	adminGroup.POST("/customers", userHandler.CreateCustomerAdmin)
-	adminGroup.PUT("/customers/:id", userHandler.UpdateCustomerAdmin)
-	adminGroup.DELETE("/customers/:id", userHandler.DeleteCustomerAdmin)
+	adminPermission := []string{
+		"users:read:all",
+		"users:write:all",
+		"users:update:all",
+		"users:delete:all",
+	}
 
-	authGroup := e.Group("/auth", mid.CheckToken())
-	authGroup.GET("/profile", userHandler.GetProfileById)
-	authGroup.PUT("/profile", userHandler.UpdateProfile)
+	authPermission := []string{
+		"users:read:own",
+		"users:write:own",
+		"users:update:own",
+		"users:delete:own",
+	}
+
+	// adminGroup := e.Group("/admin", mid.CheckToken())
+	userGroup.GET("/customers", userHandler.GetCustomersAllAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	userGroup.POST("/customers/batch", userHandler.GetBatchCustomersAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	userGroup.GET("/customers/:id", userHandler.GetCustomerByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	userGroup.POST("/customers", userHandler.CreateCustomerAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	userGroup.PUT("/customers/:id", userHandler.UpdateCustomerAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	userGroup.DELETE("/customers/:id", userHandler.DeleteCustomerAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+
+	// authGroup := e.Group("/auth", mid.CheckToken())
+	userGroup.GET("/profile", userHandler.GetProfileById, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	userGroup.PUT("/profile", userHandler.UpdateProfile, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 
 	return userHandler
 }
@@ -87,7 +101,7 @@ func (u *userHandler) GetBatchCustomersAdmin(c echo.Context) error {
 	user := c.Get("user").(string)
 	if user == "" {
 		c.Logger().Errorf("[UserHandler-1] GetBatchCustomersAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -133,19 +147,19 @@ func (u *userHandler) DeleteCustomerAdmin(c echo.Context) error {
 	user := c.Get("user").(string)
 	if user == "" {
 		c.Logger().Errorf("[UserHandler-1] DeleteCustomerAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[UserHandler-2] DeleteCustomerAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id required"))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
 		c.Logger().Errorf("[UserHandler-3] DeleteCustomerAdmin: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id invalid"))
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	if err := u.userService.DeleteCustomer(ctx, id); err != nil {
@@ -177,13 +191,13 @@ func (u *userHandler) UpdateCustomerAdmin(c echo.Context) error {
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[UserHandler-2] UpdateCustomerAdmin: %s", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id required"))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
 		c.Logger().Errorf("[UserHandler-3] UpdateCustomerAdmin: %s", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id invalid"))
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -237,7 +251,7 @@ func (u *userHandler) CreateCustomerAdmin(c echo.Context) error {
 	user := c.Get("user").(string)
 	if user == "" {
 		c.Logger().Errorf("[UserHandler-1] CreateCustomerAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -295,19 +309,19 @@ func (u *userHandler) GetCustomerByIdAdmin(c echo.Context) error {
 	user := c.Get("user").(string)
 	if user == "" {
 		c.Logger().Errorf("[UserHandler-1] GetCustomerByIdAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[UserHandler-2] GetCustomerByIdAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id required"))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
 		c.Logger().Errorf("[UserHandler-3] GetCustomerByIdAdmin: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id invalid"))
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	result, err := u.userService.GetCustomerById(ctx, id)
@@ -346,7 +360,7 @@ func (u *userHandler) GetCustomersAllAdmin(c echo.Context) error {
 	user := c.Get("user").(string)
 	if user == "" {
 		c.Logger().Errorf("[UserHandler-1] GetCustomersAllAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
 	search := c.QueryParam("search")
@@ -418,7 +432,7 @@ func (u *userHandler) UpdateProfile(c echo.Context) error {
 	user := c.Get("user").(string)
 	if user == "" {
 		c.Logger().Errorf("[UserHandler-1] UpdateProfile: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
@@ -458,7 +472,7 @@ func (u *userHandler) UpdateProfile(c echo.Context) error {
 		c.Logger().Errorf("[UserHandler-5] UpdateProfile: %v", err)
 		switch err.Error() {
 		case utils.DATA_NOT_FOUND:
-			return c.JSON(http.StatusConflict, response.ResponseFailed(err.Error()))
+			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
 		case utils.EMAIL_ALREADY_EXISTS:
 			return c.JSON(http.StatusConflict, response.ResponseFailed(err.Error()))
 		case utils.EMAIL_NOT_VERIFIED:
@@ -482,7 +496,7 @@ func (u *userHandler) GetProfileById(c echo.Context) error {
 	user := c.Get("user").(string)
 	if user == "" {
 		c.Logger().Errorf("[UserHandler-1] GetProfileById: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
@@ -528,7 +542,7 @@ func (u *userHandler) UpdatePassword(c echo.Context) error {
 	tokenString := c.QueryParam("token")
 	if tokenString == "" {
 		c.Logger().Errorf("[UserHandler-1] UpdatePassword: %v", "missing or invalid token")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -578,7 +592,7 @@ func (u *userHandler) ActivateAccount(c echo.Context) error {
 	tokenString := c.QueryParam("token")
 	if tokenString == "" {
 		c.Logger().Errorf("[UserHandler-1] ActivateAccount: %v", "missing or invalid token")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
 	user, err := u.userService.ActivateAccount(ctx, tokenString)

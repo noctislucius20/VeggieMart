@@ -169,6 +169,10 @@ func (p *productService) GetAllProducts(ctx context.Context, query entity.QueryS
 			return err
 		}
 
+		if len(productEntities) == 0 {
+			return nil
+		}
+
 		products, countData, totalPages = productEntities, count, pages
 
 		return nil
@@ -222,6 +226,10 @@ func (p *productService) UpdateProduct(ctx context.Context, req entity.ProductEn
 	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
 		categoryEntity, err := p.categoryService.GetCategoryBySlug(txCtx, req.CategorySlug)
 		if err != nil {
+			if err.Error() == utils.DATA_NOT_FOUND {
+				err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+				return err
+			}
 			return err
 		}
 
