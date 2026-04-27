@@ -6,5 +6,5 @@ type PaymentLog struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	PaymentID uint      `gorm:"not null;index" json:"payment_id"`
 	Status    string    `gorm:"type:varchar(50);not null" json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	CreatedAt time.Time `gorm:"type:timestamp;default:current_timestamp" json:"created_at"`
 }

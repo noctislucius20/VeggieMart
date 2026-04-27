@@ -35,14 +35,18 @@ func (cfg Config) ConnectionPostgres(ctx context.Context) (*Postgres, error) {
 		return nil, err
 	}
 
-	db.AutoMigrate(&model.Payment{}, &model.PaymentLog{}, &model.OutboxEvent{})
-
 	go func() {
 		sqlDB, err := db.DB()
 		if err != nil {
 			log.Errorf("[ConnectionPostgres-2] failed to connect with database")
 			return
 		}
+
+		db.AutoMigrate(
+			&model.Payment{},
+			&model.PaymentLog{},
+			&model.OutboxEvent{},
+		)
 
 		sqlDB.SetMaxOpenConns(cfg.Psql.DBMaxOpen)
 		sqlDB.SetMaxIdleConns(cfg.Psql.DBMaxIdle)

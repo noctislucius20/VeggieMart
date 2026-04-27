@@ -7,6 +7,7 @@ import (
 	"payment-service/config"
 	"payment-service/internal/adapter/message/publisher"
 	"payment-service/internal/adapter/repository"
+	"payment-service/internal/core/service/transaction"
 	"payment-service/utils/logger"
 	"sync"
 	"syscall"
@@ -17,33 +18,43 @@ import (
 )
 
 func startPublisherWorker() {
-	var wg sync.WaitGroup
-	defer wg.Wait()
+	var (
+		customLogger = logger.NewLogger().Logger()
+		cfg          = config.NewConfig()
+		wg           sync.WaitGroup
+		txManager    transaction.TransactionManager
+	)
+
+	conn, err := config.NewConfig().NewRabbitMQ()
+	if err != nil {
+		customLogger.Fatalf("[PublisherWorker-1] %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	cfg := config.NewConfig()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
 	db, err := cfg.ConnectionPostgres(ctx)
 	if err != nil {
-		log.Fatalf("[PublisherWorker-1] %v", err.Error())
-		return
+		log.Fatalf("[PublisherWorker-2] %v", err)
 	}
 
-	customLogger := logger.NewLogger().Logger()
-
-	outboxRepo := repository.NewOutboxEventRepository(customLogger)
+	outboxRepo := repository.NewOutboxEventRepository(db.DB, customLogger)
 
 	wg.Go(func() {
-		publisher.NewStartPublisherWorker(db.DB, outboxRepo, customLogger).StartPublisherWorker(ctx)
+		publisher.NewStartPublisherWorker(conn, outboxRepo, txManager, customLogger).StartPublisherWorker(ctx)
 	})
 
 	<-quit
-	customLogger.Infof("[PublisherWorker-2] shutting down publisher worker...")
+
+	cancel()
+
+	wg.Wait()
+
+	conn.Close()
+
+	customLogger.Infof("[PublisherWorker-3] shutting down publisher worker...")
 }
 
 var workerPublisherCmd = &cobra.Command{

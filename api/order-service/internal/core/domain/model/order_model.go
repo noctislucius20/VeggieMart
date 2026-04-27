@@ -20,5 +20,5 @@ type Order struct {
 	CreatedAt    time.Time       `gorm:"type:timestamp;default:current_timestamp"`
 	UpdatedAt    time.Time       `gorm:"type:timestamp"`
 	DeletedAt    *gorm.DeletedAt `gorm:"index"`
-	OrderItems   []OrderItem     `gorm:"foreignKey:OrderID"`
+	OrderItems   []OrderItem     `gorm:"foreignKey:OrderID;constraint:OnDelete:CASCADE"`
 }

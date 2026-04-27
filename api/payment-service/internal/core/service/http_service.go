@@ -38,8 +38,14 @@ func (h *httpService) HttpOrderIdByOrderCodePublicService(orderCode string) (uin
 	}
 
 	if orderFetch.StatusCode != 200 {
-		err := errors.New(strconv.Itoa(orderFetch.StatusCode))
-		return 0, err
+		switch orderFetch.StatusCode {
+		case 404:
+			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+			return 0, err
+		default:
+			err := errors.New(utils.INTERNAL_SERVER_ERROR)
+			return 0, err
+		}
 	}
 
 	body, err := io.ReadAll(orderFetch.Body)
@@ -81,7 +87,7 @@ func (h *httpService) HttpOrderByIdService(orderId int64, userData string) (*ent
 	if orderFetch.StatusCode != 200 {
 		switch orderFetch.StatusCode {
 		case 404:
-			err := errors.New(utils.DATA_NOT_FOUND)
+			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
 			return nil, err
 		default:
 			err := errors.New(utils.INTERNAL_SERVER_ERROR)
@@ -128,8 +134,14 @@ func (h *httpService) HttpOrdersAllService(orderIds []int64, userData string) (m
 	}
 
 	if orderFetch.StatusCode != 200 {
-		err := errors.New(strconv.Itoa(orderFetch.StatusCode))
-		return nil, err
+		switch orderFetch.StatusCode {
+		case 404:
+			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+			return nil, err
+		default:
+			err := errors.New(utils.INTERNAL_SERVER_ERROR)
+			return nil, err
+		}
 	}
 
 	body, err := io.ReadAll(orderFetch.Body)
