@@ -17,6 +17,7 @@ import (
 
 type PaymentCacheInterface interface {
 	GetPaymentById(ctx context.Context, paymentId uint, userId uint) (*entity.PaymentEntity, error)
+	GetRoleById(ctx context.Context, id int64) (*entity.RoleEntity, error)
 	DeletePaymentCache(ctx context.Context, id int64) error
 }
 
@@ -32,6 +33,25 @@ func NewPaymentCache(redisClient *redis.Client, repoPayment repository.PaymentRe
 		repoPayment: repoPayment,
 		logger:      logger,
 	}
+}
+
+// GetRoleById implements [PaymentCacheInterface].
+func (p *paymentCache) GetRoleById(ctx context.Context, id int64) (*entity.RoleEntity, error) {
+	var roleEntity entity.RoleEntity
+
+	keyRolePermission := fmt.Sprintf("role:id:%d", id)
+	rolePermission, err := p.redisClient.Get(ctx, keyRolePermission).Result()
+	if err != nil {
+		p.logger.Errorf("[OrderCache-1] GetRoleById: %v", err)
+		if errors.Is(err, redis.Nil) {
+			return nil, errors.New(utils.RELATION_DATA_NOT_FOUND)
+		}
+		return nil, err
+	}
+
+	json.Unmarshal([]byte(rolePermission), &roleEntity)
+
+	return &roleEntity, nil
 }
 
 // GetPaymentById implements [PaymentCacheInterface].

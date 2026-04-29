@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"payment-service/config"
 	httpclient "payment-service/internal/adapter/http_client"
 	"payment-service/internal/adapter/repository"
@@ -18,13 +17,13 @@ import (
 )
 
 type PaymentServiceInterface interface {
-	ProcessPayment(ctx context.Context, payment entity.PaymentEntity, userData string) (*entity.PaymentEntity, error)
+	ProcessPayment(ctx context.Context, payment entity.PaymentEntity, jwtUserData entity.JwtUserData) (*entity.PaymentEntity, error)
 	UpdateStatusByOrderCode(ctx context.Context, orderCode string, status string) error
 	GetAllPayments(ctx context.Context, query entity.QueryStringPayment, userData string) ([]entity.PaymentEntity, int64, int64, error)
 	GetPaymentById(ctx context.Context, paymentId uint, jwtUserData entity.JwtUserData, userData string) (*entity.PaymentEntity, error)
 
 	getAllOrders(ctx context.Context, payments []entity.PaymentEntity, userData string) error
-	getByIdOrder(ctx context.Context, payment *entity.PaymentEntity, userData string) error
+	getByIdOrder(ctx context.Context, payment *entity.PaymentEntity, jwtUserData entity.JwtUserData, roleName string) error
 }
 
 type paymentService struct {
@@ -56,16 +55,19 @@ func (p *paymentService) GetPaymentById(ctx context.Context, paymentId uint, jwt
 	payment := &entity.PaymentEntity{}
 
 	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		fmt.Println(jwtUserData.RoleName)
-		fmt.Println(jwtUserData.UserID)
-		switch strings.ToLower(jwtUserData.RoleName) {
+		roleEntity, err := p.cachePayment.GetRoleById(txCtx, jwtUserData.RoleID)
+		if err != nil {
+			return err
+		}
+
+		switch strings.ToLower(roleEntity.Name) {
 		case "customer": // requested by customer
 			paymentEntity, err := p.cachePayment.GetPaymentById(txCtx, paymentId, uint(jwtUserData.UserID))
 			if err != nil {
 				return err
 			}
 
-			if err := p.getByIdOrder(txCtx, paymentEntity, userData); err != nil {
+			if err := p.getByIdOrder(txCtx, paymentEntity, jwtUserData, roleEntity.Name); err != nil {
 				return err
 			}
 
@@ -76,7 +78,7 @@ func (p *paymentService) GetPaymentById(ctx context.Context, paymentId uint, jwt
 				return err
 			}
 
-			if err := p.getByIdOrder(txCtx, paymentEntity, userData); err != nil {
+			if err := p.getByIdOrder(txCtx, paymentEntity, jwtUserData, roleEntity.Name); err != nil {
 				return err
 			}
 
@@ -152,7 +154,7 @@ func (p *paymentService) UpdateStatusByOrderCode(ctx context.Context, orderCode 
 }
 
 // ProcessPayment implements [PaymentServiceInterface].
-func (p *paymentService) ProcessPayment(ctx context.Context, payment entity.PaymentEntity, userData string) (*entity.PaymentEntity, error) {
+func (p *paymentService) ProcessPayment(ctx context.Context, payment entity.PaymentEntity, jwtUserData entity.JwtUserData) (*entity.PaymentEntity, error) {
 	publishPaymentSuccess := p.cfg.PublisherName.PaymentSuccess
 
 	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
@@ -189,7 +191,12 @@ func (p *paymentService) ProcessPayment(ctx context.Context, payment entity.Paym
 
 			payment.ID = paymentId
 		case "midtrans":
-			if err := p.getByIdOrder(txCtx, &payment, userData); err != nil {
+			roleEntity, err := p.cachePayment.GetRoleById(txCtx, jwtUserData.RoleID)
+			if err != nil {
+				return err
+			}
+
+			if err := p.getByIdOrder(txCtx, &payment, jwtUserData, roleEntity.Name); err != nil {
 				return err
 			}
 
@@ -243,7 +250,7 @@ func (p *paymentService) ProcessPayment(ctx context.Context, payment entity.Paym
 }
 
 // getByIdOrder implements [PaymentServiceInterface].
-func (p *paymentService) getByIdOrder(ctx context.Context, payment *entity.PaymentEntity, userData string) error {
+func (p *paymentService) getByIdOrder(ctx context.Context, payment *entity.PaymentEntity, jwtUserData entity.JwtUserData, roleName string) error {
 	var (
 		wg          sync.WaitGroup
 		resultOrder *entity.OrderDetailResponseEntity
@@ -252,7 +259,7 @@ func (p *paymentService) getByIdOrder(ctx context.Context, payment *entity.Payme
 	)
 
 	wg.Go(func() {
-		resultOrder, err = p.httpService.HttpOrderByIdService(int64(payment.OrderID), userData)
+		resultOrder, err = p.httpService.HttpOrderByIdService(int64(payment.OrderID), jwtUserData, roleName)
 		if err != nil {
 			errCh <- err
 		}

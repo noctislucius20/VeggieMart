@@ -15,7 +15,7 @@ import (
 
 type HttpServiceInterface interface {
 	HttpOrdersAllService(orderIds []int64, userData string) (map[int64]entity.OrderDetailResponseEntity, error)
-	HttpOrderByIdService(orderId int64, userData string) (*entity.OrderDetailResponseEntity, error)
+	HttpOrderByIdService(orderId int64, jwtUserData entity.JwtUserData, roleName string) (*entity.OrderDetailResponseEntity, error)
 	HttpOrderIdByOrderCodePublicService(orderCode string) (uint, error)
 }
 
@@ -63,19 +63,14 @@ func (h *httpService) HttpOrderIdByOrderCodePublicService(orderCode string) (uin
 }
 
 // HttpOrderByIdService implements [HttpServiceInterface].
-func (h *httpService) HttpOrderByIdService(orderId int64, userData string) (*entity.OrderDetailResponseEntity, error) {
-	userDataEntity := entity.JwtUserData{}
-	if err := json.Unmarshal([]byte(userData), &userDataEntity); err != nil {
-		return nil, err
-	}
-
+func (h *httpService) HttpOrderByIdService(orderId int64, jwtUserData entity.JwtUserData, roleName string) (*entity.OrderDetailResponseEntity, error) {
 	baseUrlOrder := fmt.Sprintf("%s%s", h.cfg.App.OrderServiceUrl, "/admin/orders/"+strconv.Itoa(int(orderId)))
-	if strings.ToLower(userDataEntity.RoleName) == "customer" {
+	if strings.ToLower(roleName) == "customer" {
 		baseUrlOrder = fmt.Sprintf("%s%s", h.cfg.App.OrderServiceUrl, "/auth/orders/"+strconv.Itoa(int(orderId)))
 	}
 
 	header := map[string]string{
-		"Authorization": "Bearer " + userDataEntity.Token,
+		"Authorization": "Bearer " + jwtUserData.Token,
 		"Content-Type":  "application/json",
 	}
 

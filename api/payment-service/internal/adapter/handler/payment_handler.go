@@ -50,14 +50,28 @@ func NewPaymentHandler(paymentService service.PaymentServiceInterface, e *echo.E
 
 	e.POST("/payments/webhook", paymentHandler.MidtransWebhook)
 
-	authGroup := e.Group("/auth", mid.CheckToken())
-	authGroup.POST("/payments", paymentHandler.CreatePayment)
-	authGroup.GET("/payments", paymentHandler.GetAllPayments)
-	authGroup.GET("/payments/:id", paymentHandler.GetPaymentById)
+	authPermission := []string{
+		"payments:read:own",
+		"payments:write:own",
+		"payments:update:own",
+		"payments:delete:own",
+	}
 
-	adminGroup := e.Group("/admin", mid.CheckToken())
-	adminGroup.GET("/payments", paymentHandler.GetAllPaymentsAdmin)
-	adminGroup.GET("/payments/:id", paymentHandler.GetPaymentByIdAdmin)
+	adminPermission := []string{
+		"payments:read:all",
+		"payments:write:all",
+		"payments:update:all",
+		"payments:delete:all",
+	}
+
+	// authGroup := e.Group("/auth", mid.CheckToken())
+	e.POST("/payments", paymentHandler.CreatePayment, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	e.GET("/payments", paymentHandler.GetAllPayments, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	e.GET("/payments/:id", paymentHandler.GetPaymentById, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+
+	// adminGroup := e.Group("/admin", mid.CheckToken())
+	e.GET("/payments", paymentHandler.GetAllPaymentsAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	e.GET("/payments/:id", paymentHandler.GetPaymentByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
 
 	return paymentHandler
 }
@@ -84,13 +98,13 @@ func (p *paymentHandler) GetPaymentById(c echo.Context) error {
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[PaymentHandler-3] GetPaymentById: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id required"))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
 		c.Logger().Errorf("[PaymentHandler-4] GetPaymentById: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id invalid"))
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	result, err := p.paymentService.GetPaymentById(ctx, uint(id), jwtUserData, user)
@@ -145,13 +159,13 @@ func (p *paymentHandler) GetPaymentByIdAdmin(c echo.Context) error {
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[PaymentHandler-3] GetPaymentByIdAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id required"))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
 		c.Logger().Errorf("[PaymentHandler-4] GetPaymentByIdAdmin: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id invalid"))
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
 	}
 
 	result, err := p.paymentService.GetPaymentById(ctx, uint(id), jwtUserData, user)
@@ -381,8 +395,9 @@ func (p *paymentHandler) MidtransWebhook(c echo.Context) error {
 // CreatePayment implements [PaymentHandlerInterface].
 func (p *paymentHandler) CreatePayment(c echo.Context) error {
 	var (
-		ctx = c.Request().Context()
-		req = request.PaymentRequest{}
+		ctx         = c.Request().Context()
+		req         = request.PaymentRequest{}
+		jwtUserData = entity.JwtUserData{}
 	)
 
 	user := c.Get("user").(string)
@@ -391,13 +406,18 @@ func (p *paymentHandler) CreatePayment(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
-	if err := c.Bind(&req); err != nil {
+	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
 		c.Logger().Errorf("[PaymentHandler-2] CreatePayment: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+	}
+
+	if err := c.Bind(&req); err != nil {
+		c.Logger().Errorf("[PaymentHandler-3] CreatePayment: %v", err)
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[PaymentHandler-3] CreatePayment: %v", err)
+		c.Logger().Errorf("[PaymentHandler-4] CreatePayment: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -409,9 +429,9 @@ func (p *paymentHandler) CreatePayment(c echo.Context) error {
 		Remarks:       req.Remarks,
 	}
 
-	result, err := p.paymentService.ProcessPayment(ctx, reqEntity, user)
+	result, err := p.paymentService.ProcessPayment(ctx, reqEntity, jwtUserData)
 	if err != nil {
-		c.Logger().Errorf("[PaymentHandler-4] CreatePayment: %v", err)
+		c.Logger().Errorf("[PaymentHandler-5] CreatePayment: %v", err)
 		switch err.Error() {
 		case utils.INVALID_PAYMENT_METHOD:
 			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
