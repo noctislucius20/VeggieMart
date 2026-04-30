@@ -175,6 +175,8 @@ func (p *productHandler) GetAllProductsShop(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
+	// TODO: check if price range is valid
+
 	reqEntity := entity.QueryStringProduct{
 		Search:     search,
 		Page:       page,
