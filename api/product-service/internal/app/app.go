@@ -54,7 +54,7 @@ func RunServer() {
 	e.Validator = customValidator
 	e.Logger = customLogger.Logger()
 
-	esClient, err := cfg.NewElasticSearchClient()
+	esClient, err := cfg.NewElasticsearchClient()
 	if err != nil {
 		customLogger.Logger().Fatalf("[RunServer-3] %v", err)
 		return

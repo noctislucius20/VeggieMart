@@ -51,9 +51,9 @@ func (s *startPublisherWorker) StartPublisherWorker(ctx context.Context) {
 		})
 	}
 
-	close(jobChan)
-
 	wg.Wait()
+
+	close(jobChan)
 }
 
 func (s *startPublisherWorker) startPoller(ctx context.Context, jobs chan<- entity.OutboxEventEntity) {

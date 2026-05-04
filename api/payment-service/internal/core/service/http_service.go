@@ -64,9 +64,9 @@ func (h *httpService) HttpOrderIdByOrderCodePublicService(orderCode string) (uin
 
 // HttpOrderByIdService implements [HttpServiceInterface].
 func (h *httpService) HttpOrderByIdService(orderId int64, jwtUserData entity.JwtUserData, roleName string) (*entity.OrderDetailResponseEntity, error) {
-	baseUrlOrder := fmt.Sprintf("%s%s", h.cfg.App.OrderServiceUrl, "/admin/orders/"+strconv.Itoa(int(orderId)))
+	baseUrlOrder := fmt.Sprintf("%s%s", h.cfg.App.OrderServiceUrl, "/orders/"+strconv.Itoa(int(orderId))+"/admin")
 	if strings.ToLower(roleName) == "customer" {
-		baseUrlOrder = fmt.Sprintf("%s%s", h.cfg.App.OrderServiceUrl, "/auth/orders/"+strconv.Itoa(int(orderId)))
+		baseUrlOrder = fmt.Sprintf("%s%s", h.cfg.App.OrderServiceUrl, "/orders/"+strconv.Itoa(int(orderId)))
 	}
 
 	header := map[string]string{
@@ -106,7 +106,7 @@ func (h *httpService) HttpOrderByIdService(orderId int64, jwtUserData entity.Jwt
 }
 
 func (h *httpService) HttpOrdersAllService(orderIds []int64, userData string) (map[int64]entity.OrderDetailResponseEntity, error) {
-	baseUrlOrder := fmt.Sprintf("%s%s", h.cfg.App.OrderServiceUrl, "/auth/orders/batch")
+	baseUrlOrder := fmt.Sprintf("%s%s", h.cfg.App.OrderServiceUrl, "/orders/batch")
 
 	userDataEntity := entity.JwtUserData{}
 	if err := json.Unmarshal([]byte(userData), &userDataEntity); err != nil {

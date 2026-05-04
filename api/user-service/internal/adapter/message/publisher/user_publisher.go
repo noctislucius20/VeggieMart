@@ -13,7 +13,6 @@ import (
 
 	"github.com/labstack/gommon/log"
 	amqp "github.com/rabbitmq/amqp091-go"
-	"gorm.io/gorm"
 )
 
 type StartPublisherWorkerInterface interface {
@@ -21,11 +20,19 @@ type StartPublisherWorkerInterface interface {
 }
 
 type startPublisherWorker struct {
-	db         *gorm.DB
 	repoOutbox repository.OutboxEventInterface
 	txManager  transaction.TransactionManager
 	conn       *amqp.Connection
 	logger     *log.Logger
+}
+
+func NewStartPublisherWorker(conn *amqp.Connection, txManager transaction.TransactionManager, repoOutbox repository.OutboxEventInterface, logger *log.Logger) StartPublisherWorkerInterface {
+	return &startPublisherWorker{
+		conn:       conn,
+		txManager:  txManager,
+		repoOutbox: repoOutbox,
+		logger:     logger,
+	}
 }
 
 // StartPublisherWorker implements StartPublisherWorkerInterface.
@@ -45,10 +52,9 @@ func (s *startPublisherWorker) StartPublisherWorker(ctx context.Context) {
 		})
 	}
 
-	close(jobChan)
-
 	wg.Wait()
 
+	close(jobChan)
 }
 
 func (s *startPublisherWorker) startPoller(ctx context.Context, jobs chan<- entity.OutboxEventEntity) {
@@ -70,7 +76,7 @@ func (s *startPublisherWorker) startPoller(ctx context.Context, jobs chan<- enti
 
 				return nil
 			}); err != nil {
-				s.logger.Errorf("[StartPublisherWorker-2] startPoller: %v", err.Error())
+				s.logger.Errorf("[StartPublisherWorker-1] startPoller: %v", err)
 				return
 			}
 
@@ -93,14 +99,14 @@ func (s *startPublisherWorker) startPoller(ctx context.Context, jobs chan<- enti
 func (s *startPublisherWorker) startPublisher(ctx context.Context, jobs <-chan entity.OutboxEventEntity) {
 	ch, err := s.conn.Channel()
 	if err != nil {
-		s.logger.Errorf("[StartPublisherWorker-1] startPublisher: %v", err.Error())
+		s.logger.Errorf("[StartPublisherWorker-1] startPublisher: %v", err)
 		return
 	}
 
 	defer ch.Close()
 
 	if err := ch.Confirm(false); err != nil {
-		s.logger.Errorf("[StartPublisherWorker-2] startPublisher: %v", err.Error())
+		s.logger.Errorf("[StartPublisherWorker-2] startPublisher: %v", err)
 		return
 	}
 
@@ -117,7 +123,7 @@ func (s *startPublisherWorker) startPublisher(ctx context.Context, jobs <-chan e
 			}
 
 			if _, err = ch.QueueDeclare(outbox.EventType, true, false, false, false, nil); err != nil {
-				s.logger.Errorf("[StartPublisherWorker-4] startPublisher: %v", err.Error())
+				s.logger.Errorf("[StartPublisherWorker-4] startPublisher: %v", err)
 				return
 			}
 
@@ -129,7 +135,7 @@ func (s *startPublisherWorker) startPublisher(ctx context.Context, jobs <-chan e
 
 					return nil
 				}); err != nil {
-					s.logger.Errorf("[StartPublisherWorker-5] startPublisher: %v", err.Error())
+					s.logger.Errorf("[StartPublisherWorker-5] startPublisher: %v", err)
 					return
 				}
 
@@ -143,7 +149,7 @@ func (s *startPublisherWorker) startPublisher(ctx context.Context, jobs <-chan e
 
 				return nil
 			}); err != nil {
-				s.logger.Errorf("[StartPublisherWorker-6] startPublisher: %v", err.Error())
+				s.logger.Errorf("[StartPublisherWorker-6] startPublisher: %v", err)
 				return
 			}
 		}
@@ -162,7 +168,7 @@ func (s *startPublisherWorker) publishOne(ctx context.Context, ch *amqp.Channel,
 			Body:        []byte(outbox.Payload),
 			MessageId:   fmt.Sprintf("%d", outbox.ID),
 		}); err != nil {
-		s.logger.Errorf("[StartPublisherWorker-1] publishOne: %v", err.Error())
+		s.logger.Errorf("[StartPublisherWorker-1] publishOne: %v", err)
 		return err
 	}
 
@@ -172,7 +178,7 @@ func (s *startPublisherWorker) publishOne(ctx context.Context, ch *amqp.Channel,
 	select {
 	case <-ctx.Done():
 		err := errors.New(utils.SERVICE_UNAVAILABLE)
-		s.logger.Errorf("[StartPublisherWorker-2] publishOne: %v", err.Error())
+		s.logger.Errorf("[StartPublisherWorker-2] publishOne: %v", err)
 
 		return err
 	case confirm := <-confirms:
@@ -188,8 +194,4 @@ func (s *startPublisherWorker) publishOne(ctx context.Context, ch *amqp.Channel,
 	}
 
 	return nil
-}
-
-func NewStartPublisherWorker(db *gorm.DB, conn *amqp.Connection, repoOutbox repository.OutboxEventInterface, logger *log.Logger) StartPublisherWorkerInterface {
-	return &startPublisherWorker{db: db, conn: conn, repoOutbox: repoOutbox, logger: logger}
 }

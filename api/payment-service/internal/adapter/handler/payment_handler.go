@@ -70,8 +70,8 @@ func NewPaymentHandler(paymentService service.PaymentServiceInterface, e *echo.E
 	e.GET("/payments/:id", paymentHandler.GetPaymentById, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 
 	// adminGroup := e.Group("/admin", mid.CheckToken())
-	e.GET("/payments", paymentHandler.GetAllPaymentsAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.GET("/payments/:id", paymentHandler.GetPaymentByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	e.GET("/payments/admin", paymentHandler.GetAllPaymentsAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	e.GET("/payments/:id/admin", paymentHandler.GetPaymentByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
 
 	return paymentHandler
 }
@@ -214,7 +214,12 @@ func (p *paymentHandler) GetAllPayments(c echo.Context) error {
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
 		c.Logger().Errorf("[PaymentHandler-2] GetAllPayments: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		switch err.Error() {
+		case utils.RELATION_DATA_NOT_FOUND:
+			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
+		default:
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		}
 	}
 
 	userId := jwtUserData.UserID
@@ -333,7 +338,12 @@ func (p *paymentHandler) GetAllPaymentsAdmin(c echo.Context) error {
 	results, countData, totalPages, err := p.paymentService.GetAllPayments(ctx, reqEntity, user)
 	if err != nil {
 		c.Logger().Errorf("[PaymentHandler-4] GetAllPaymentsAdmin: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		switch err.Error() {
+		case utils.RELATION_DATA_NOT_FOUND:
+			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
+		default:
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		}
 	}
 
 	for _, result := range results {

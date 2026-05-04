@@ -6,22 +6,35 @@ import (
 	"os/signal"
 	"product-service/config"
 	"product-service/internal/adapter/message/consumer"
+	"product-service/utils/logger"
 	"sync"
 	"syscall"
 
 	"github.com/labstack/gommon/color"
-	"github.com/labstack/gommon/log"
 	"github.com/spf13/cobra"
 )
 
 func startConsumerWorker() {
-	cfg := config.NewConfig()
+	var (
+		customLogger = logger.NewLogger().Logger()
+		cfg          = config.NewConfig()
+		wg           sync.WaitGroup
+		ctx, cancel  = context.WithCancel(context.Background())
+	)
 
-	var wg sync.WaitGroup
+	conn, err := cfg.NewRabbitMQ()
+	if err != nil {
+		customLogger.Fatalf("[StartConsumerWorker-1] %v", err)
+		return
+	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	esClient, err := cfg.NewElasticsearchClient()
+	if err != nil {
+		customLogger.Fatalf("[StartConsumerWorker-2] %v", err)
+		return
+	}
 
-	consumerWorker := consumer.NewProductConsumerWorker(cfg)
+	consumerWorker := consumer.NewProductConsumerWorker(conn, esClient, cfg, customLogger)
 
 	wg.Go(func() {
 		consumerWorker.StartCreateProductWorker(ctx)
@@ -44,7 +57,7 @@ func startConsumerWorker() {
 
 	wg.Wait()
 
-	log.Infof("[StartConsumerWorker-1] shutting down consumer worker...")
+	customLogger.Infof("[StartConsumerWorker-3] shutting down consumer worker...")
 }
 
 var workerConsumerCmd = &cobra.Command{

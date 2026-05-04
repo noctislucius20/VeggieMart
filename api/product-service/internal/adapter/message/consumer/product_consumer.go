@@ -8,7 +8,9 @@ import (
 	"product-service/config"
 	"product-service/internal/core/domain/entity"
 
+	"github.com/elastic/go-elasticsearch/v7"
 	"github.com/labstack/gommon/log"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type ProductConsumerWorkerInterface interface {
@@ -18,43 +20,43 @@ type ProductConsumerWorkerInterface interface {
 }
 
 type productConsumerWorker struct {
-	cfg *config.Config
+	conn     *amqp.Connection
+	esClient *elasticsearch.Client
+	logger   *log.Logger
+	cfg      *config.Config
+}
+
+func NewProductConsumerWorker(conn *amqp.Connection, esClient *elasticsearch.Client, cfg *config.Config, logger *log.Logger) ProductConsumerWorkerInterface {
+	return &productConsumerWorker{
+		conn:     conn,
+		esClient: esClient,
+		cfg:      cfg,
+		logger:   logger,
+	}
 }
 
 // StartUpdateProductWorker implements [ProductConsumerWorkerInterface].
 func (p *productConsumerWorker) StartUpdateProductWorker(ctx context.Context) {
-	conn, err := p.cfg.NewRabbitMQ()
+	ch, err := p.conn.Channel()
 	if err != nil {
-		log.Errorf("[ProductConsumer-1] StartUpdateProductWorker: failed to connect to RabbitMQ: %v", err)
-	}
-
-	defer conn.Close()
-
-	ch, err := conn.Channel()
-	if err != nil {
-		log.Errorf("[ProductConsumer-2] StartUpdateProductWorker: failed to open a channel: %v", err)
+		p.logger.Errorf("[ProductConsumer-1] StartUpdateProductWorker: failed to open a channel: %v", err)
 	}
 
 	defer ch.Close()
 
-	productUpdate := config.NewConfig().PublisherName.ProductUpdate
+	productUpdate := p.cfg.PublisherName.ProductUpdate
 
 	queue, err := ch.QueueDeclare(productUpdate, true, false, false, false, nil)
 	if err != nil {
-		log.Errorf("[ProductConsumer-3] StartUpdateProductWorker: failed to declare a queue: %v", err)
+		p.logger.Errorf("[ProductConsumer-2] StartUpdateProductWorker: failed to declare a queue: %v", err)
 	}
 
 	msgs, err := ch.Consume(queue.Name, "", true, false, false, false, nil)
 	if err != nil {
-		log.Errorf("[ProductConsumer-4] StartUpdateProductWorker: failed to register consumer: %v", err)
+		p.logger.Errorf("[ProductConsumer-3] StartUpdateProductWorker: failed to register consumer: %v", err)
 	}
 
-	esClient, err := config.NewConfig().NewElasticSearchClient()
-	if err != nil {
-		log.Errorf("[ProductConsumer-5] StartUpdateProductWorker: failed to initialize elasticsearch client: %v", err)
-	}
-
-	log.Infof("[ProductConsumer-6] StartUpdateProductWorker: waiting for messages. to exit press CTRL+C")
+	p.logger.Infof("[ProductConsumer-4] StartUpdateProductWorker: waiting for messages. to exit press CTRL+C")
 
 	for {
 		select {
@@ -62,7 +64,7 @@ func (p *productConsumerWorker) StartUpdateProductWorker(ctx context.Context) {
 			return
 		case d, ok := <-msgs:
 			if !ok {
-				log.Infof("[ProductConsumer-7] StartUpdateProductWorker: message channel closed")
+				p.logger.Infof("[ProductConsumer-5] StartUpdateProductWorker: message channel closed")
 				return
 			}
 
@@ -70,69 +72,57 @@ func (p *productConsumerWorker) StartUpdateProductWorker(ctx context.Context) {
 
 			err := json.Unmarshal(d.Body, &product)
 			if err != nil {
-				log.Errorf("[ProductConsumer-8] StartUpdateProductWorker: error decoding message: %v", err)
+				p.logger.Errorf("[ProductConsumer-6] StartUpdateProductWorker: error decoding message: %v", err)
 				continue
 			}
 
 			productJson, err := json.Marshal(&product)
 			if err != nil {
-				log.Errorf("[ProductConsumer-9] StartUpdateProductWorker: error encoding product to json: %v", err)
+				p.logger.Errorf("[ProductConsumer-7] StartUpdateProductWorker: error encoding product to json: %v", err)
 				continue
 			}
 
-			if _, err := esClient.Index(
+			if _, err := p.esClient.Index(
 				"products",
 				bytes.NewReader(productJson),
-				esClient.Index.WithDocumentID(fmt.Sprintf("%d", product.ID)),
-				esClient.Index.WithContext(ctx),
-				esClient.Index.WithRefresh("true"),
+				p.esClient.Index.WithDocumentID(fmt.Sprintf("%d", product.ID)),
+				p.esClient.Index.WithContext(ctx),
+				p.esClient.Index.WithRefresh("true"),
 			); err != nil {
-				log.Errorf("[ProductConsumer-10] StartUpdateProductWorker: error update document to elasticsearch: %v", err)
+				p.logger.Errorf("[ProductConsumer-8] StartUpdateProductWorker: error update document to elasticsearch: %v", err)
 				continue
 			}
 
 			// body, _ := io.ReadAll(res.Body)
 			// defer res.Body.Close()
 
-			log.Infof("[ProductConsumer-11] StartUpdateProductWorker: product %d successfully updated to elasticsearch", product.ID)
+			p.logger.Infof("[ProductConsumer-9] StartUpdateProductWorker: product %d successfully updated to elasticsearch", product.ID)
 		}
 	}
 }
 
 // StartCreateProductWorker implements [ProductConsumerWorkerInterface].
 func (p *productConsumerWorker) StartCreateProductWorker(ctx context.Context) {
-	conn, err := p.cfg.NewRabbitMQ()
+	ch, err := p.conn.Channel()
 	if err != nil {
-		log.Errorf("[ProductConsumer-1] StartCreateProductWorker: failed to connect to RabbitMQ: %v", err)
-	}
-
-	defer conn.Close()
-
-	ch, err := conn.Channel()
-	if err != nil {
-		log.Errorf("[ProductConsumer-2] StartCreateProductWorker: failed to open a channel: %v", err)
+		p.logger.Errorf("[ProductConsumer-1] StartCreateProductWorker: failed to open a channel: %v", err)
 	}
 
 	defer ch.Close()
 
-	ProductCreate := config.NewConfig().PublisherName.ProductCreate
+	ProductCreate := p.cfg.PublisherName.ProductCreate
 
 	queue, err := ch.QueueDeclare(ProductCreate, true, false, false, false, nil)
 	if err != nil {
-		log.Errorf("[ProductConsumer-3] StartCreateProductWorker: failed to declare a queue: %v", err)
+		p.logger.Errorf("[ProductConsumer-2] StartCreateProductWorker: failed to declare a queue: %v", err)
 	}
 
 	msgs, err := ch.Consume(queue.Name, "", true, false, false, false, nil)
 	if err != nil {
-		log.Errorf("[ProductConsumer-4] StartCreateProductWorker: failed to register consumer: %v", err)
+		p.logger.Errorf("[ProductConsumer-3] StartCreateProductWorker: failed to register consumer: %v", err)
 	}
 
-	esClient, err := config.NewConfig().NewElasticSearchClient()
-	if err != nil {
-		log.Errorf("[ProductConsumer-5] StartCreateProductWorker: failed to initialize elasticsearch client: %v", err)
-	}
-
-	log.Infof("[ProductConsumer-6] StartCreateProductWorker: waiting for messages. to exit press CTRL+C")
+	p.logger.Infof("[ProductConsumer-4] StartCreateProductWorker: waiting for messages. to exit press CTRL+C")
 
 	for {
 		select {
@@ -140,7 +130,7 @@ func (p *productConsumerWorker) StartCreateProductWorker(ctx context.Context) {
 			return
 		case d, ok := <-msgs:
 			if !ok {
-				log.Infof("[ProductConsumer-7] StartCreateProductWorker: message channel closed")
+				p.logger.Infof("[ProductConsumer-5] StartCreateProductWorker: message channel closed")
 				return
 			}
 
@@ -148,69 +138,57 @@ func (p *productConsumerWorker) StartCreateProductWorker(ctx context.Context) {
 
 			err := json.Unmarshal(d.Body, &product)
 			if err != nil {
-				log.Errorf("[ProductConsumer-8] StartCreateProductWorker: error decoding message: %v", err)
+				p.logger.Errorf("[ProductConsumer-6] StartCreateProductWorker: error decoding message: %v", err)
 				continue
 			}
 
 			productJson, err := json.Marshal(product)
 			if err != nil {
-				log.Errorf("[ProductConsumer-9] StartCreateProductWorker: error encoding product to json: %v", err)
+				p.logger.Errorf("[ProductConsumer-7] StartCreateProductWorker: error encoding product to json: %v", err)
 				continue
 			}
 
-			if _, err := esClient.Index(
+			if _, err := p.esClient.Index(
 				"products",
 				bytes.NewReader(productJson),
-				esClient.Index.WithDocumentID(fmt.Sprintf("%d", product.ID)),
-				esClient.Index.WithContext(ctx),
-				esClient.Index.WithRefresh("true"),
+				p.esClient.Index.WithDocumentID(fmt.Sprintf("%d", product.ID)),
+				p.esClient.Index.WithContext(ctx),
+				p.esClient.Index.WithRefresh("true"),
 			); err != nil {
-				log.Errorf("[ProductConsumer-10] StartCreateProductWorker: error indexing to elasticsearch: %v", err)
+				p.logger.Errorf("[ProductConsumer-8] StartCreateProductWorker: error indexing to elasticsearch: %v", err)
 				continue
 			}
 
 			// body, _ := io.ReadAll(res.Body)
 			// defer res.Body.Close()
 
-			log.Infof("[ProductConsumer-11] StartCreateProductWorker: product %d successfully indexed to elasticsearch", product.ID)
+			p.logger.Infof("[ProductConsumer-9] StartCreateProductWorker: product %d successfully indexed to elasticsearch", product.ID)
 		}
 	}
 }
 
 // StartDeleteProductWorker implements [ProductConsumerWorkerInterface].
 func (p *productConsumerWorker) StartDeleteProductWorker(ctx context.Context) {
-	conn, err := p.cfg.NewRabbitMQ()
+	ch, err := p.conn.Channel()
 	if err != nil {
-		log.Errorf("[ProductConsumer-1] StartDeleteProductWorker: failed to connect to RabbitMQ: %v", err)
-	}
-
-	defer conn.Close()
-
-	ch, err := conn.Channel()
-	if err != nil {
-		log.Errorf("[ProductConsumer-2] StartDeleteProductWorker: failed to open a channel: %v", err)
+		p.logger.Errorf("[ProductConsumer-1] StartDeleteProductWorker: failed to open a channel: %v", err)
 	}
 
 	defer ch.Close()
 
-	ProductDelete := config.NewConfig().PublisherName.ProductDelete
+	ProductDelete := p.cfg.PublisherName.ProductDelete
 
 	queue, err := ch.QueueDeclare(ProductDelete, true, false, false, false, nil)
 	if err != nil {
-		log.Errorf("[ProductConsumer-3] StartDeleteProductWorker: failed to declare a queue: %v", err)
+		p.logger.Errorf("[ProductConsumer-2] StartDeleteProductWorker: failed to declare a queue: %v", err)
 	}
 
 	msgs, err := ch.Consume(queue.Name, "", true, false, false, false, nil)
 	if err != nil {
-		log.Errorf("[ProductConsumer-4] StartDeleteProductWorker: failed to register consumer: %v", err)
+		p.logger.Errorf("[ProductConsumer-3] StartDeleteProductWorker: failed to register consumer: %v", err)
 	}
 
-	esClient, err := config.NewConfig().NewElasticSearchClient()
-	if err != nil {
-		log.Errorf("[ProductConsumer-5] StartDeleteProductWorker: failed to initialize elasticsearch client: %v", err)
-	}
-
-	log.Infof("[ProductConsumer-6] StartDeleteProductWorker: waiting for messages. to exit press CTRL+C")
+	p.logger.Infof("[ProductConsumer-4] StartDeleteProductWorker: waiting for messages. to exit press CTRL+C")
 
 	for {
 		select {
@@ -218,7 +196,7 @@ func (p *productConsumerWorker) StartDeleteProductWorker(ctx context.Context) {
 			return
 		case d, ok := <-msgs:
 			if !ok {
-				log.Infof("[ProductConsumer-7] StartDeleteProductWorker: message channel closed")
+				p.logger.Infof("[ProductConsumer-5] StartDeleteProductWorker: message channel closed")
 				return
 			}
 
@@ -226,23 +204,19 @@ func (p *productConsumerWorker) StartDeleteProductWorker(ctx context.Context) {
 
 			err := json.Unmarshal(d.Body, &product)
 			if err != nil {
-				log.Errorf("[ProductConsumer-8] StartDeleteProductWorker: error decoding message: %v", err)
+				p.logger.Errorf("[ProductConsumer-6] StartDeleteProductWorker: error decoding message: %v", err)
 				continue
 			}
 
-			if _, err := esClient.Delete("products", fmt.Sprintf("%d", product.ID), esClient.Delete.WithContext(ctx)); err != nil {
-				log.Errorf("[ProductConsumer-9] StartDeleteProductWorker: error deleting from elasticsearch: %v", err)
+			if _, err := p.esClient.Delete("products", fmt.Sprintf("%d", product.ID), p.esClient.Delete.WithContext(ctx)); err != nil {
+				p.logger.Errorf("[ProductConsumer-7] StartDeleteProductWorker: error deleting from elasticsearch: %v", err)
 				continue
 			}
 
 			// body, _ := io.ReadAll(res.Body)
 			// defer res.Body.Close()
 
-			log.Infof("[ProductConsumer-10] StartDeleteProductWorker: product %d successfully deleted from elasticsearch", product.ID)
+			p.logger.Infof("[ProductConsumer-8] StartDeleteProductWorker: product %d successfully deleted from elasticsearch", product.ID)
 		}
 	}
-}
-
-func NewProductConsumerWorker(cfg *config.Config) ProductConsumerWorkerInterface {
-	return &productConsumerWorker{cfg: cfg}
 }

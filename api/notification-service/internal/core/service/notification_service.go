@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"notification-service/internal/adapter/repository"
 	"notification-service/internal/core/domain/entity"
+	"notification-service/internal/core/service/transaction"
 	"notification-service/utils"
 
 	"github.com/labstack/gommon/log"
@@ -19,19 +20,31 @@ type NotificationServiceInterface interface {
 }
 
 type notificationService struct {
-	repo   repository.NotificationRepositoryInterface
-	db     *gorm.DB
-	logger *log.Logger
+	repo      repository.NotificationRepositoryInterface
+	db        *gorm.DB
+	txManager transaction.TransactionManager
+	logger    *log.Logger
 }
+
+func NewNotificationService(repo repository.NotificationRepositoryInterface, txManager transaction.TransactionManager, db *gorm.DB, logger *log.Logger) NotificationServiceInterface {
+	return &notificationService{
+		repo:      repo,
+		txManager: txManager,
+		db:        db,
+		logger:    logger,
+	}
+}
+
+// TODO add cache notification
 
 // MarkAsReadNotification implements [NotificationServiceInterface].
 func (n *notificationService) MarkAsReadNotification(ctx context.Context, notificationId uint) error {
-	if err := n.db.Transaction(func(tx *gorm.DB) error {
-		if _, err := n.repo.GetNotificationById(ctx, notificationId, tx); err != nil {
+	if err := n.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if _, err := n.repo.GetNotificationById(txCtx, notificationId); err != nil {
 			return err
 		}
 
-		if err := n.repo.MarkAsReadNotification(ctx, notificationId, tx); err != nil {
+		if err := n.repo.MarkAsReadNotification(txCtx, notificationId); err != nil {
 			return err
 		}
 
@@ -50,7 +63,7 @@ func (n *notificationService) SendPushNotification(ctx context.Context, notifica
 		return
 	}
 
-	if err := n.db.Transaction(func(tx *gorm.DB) error {
+	if err := n.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
 		conn := utils.GetWebSocketConn(*notification.ReceiverID)
 		if conn == nil {
 			err := fmt.Errorf("%v, ID = %d", utils.DATA_NOT_FOUND, *notification.ReceiverID)
@@ -68,11 +81,11 @@ func (n *notificationService) SendPushNotification(ctx context.Context, notifica
 			return err
 		}
 
-		if _, err := n.repo.GetNotificationById(ctx, notification.ID, tx); err != nil {
+		if _, err := n.repo.GetNotificationById(txCtx, notification.ID); err != nil {
 			return err
 		}
 
-		if err := n.repo.MarkAsSentNotification(ctx, notification.ID, tx); err != nil {
+		if err := n.repo.MarkAsSentNotification(txCtx, notification.ID); err != nil {
 			return err
 		}
 
@@ -87,8 +100,8 @@ func (n *notificationService) SendPushNotification(ctx context.Context, notifica
 func (n *notificationService) GetNotificationById(ctx context.Context, notificationId uint) (*entity.NotificationEntity, error) {
 	notification := &entity.NotificationEntity{}
 
-	if err := n.db.Transaction(func(tx *gorm.DB) error {
-		notificationEntity, err := n.repo.GetNotificationById(ctx, notificationId, tx)
+	if err := n.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		notificationEntity, err := n.repo.GetNotificationById(txCtx, notificationId)
 		if err != nil {
 			return err
 		}
@@ -112,8 +125,8 @@ func (n *notificationService) GetAllNotifications(ctx context.Context, query ent
 		totalPages    int64
 	)
 
-	if err := n.db.Transaction(func(tx *gorm.DB) error {
-		notificationEntities, count, pages, err := n.repo.GetAllNotifications(ctx, query, tx)
+	if err := n.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		notificationEntities, count, pages, err := n.repo.GetAllNotifications(txCtx, query)
 		if err != nil {
 			return nil
 		}
@@ -131,8 +144,4 @@ func (n *notificationService) GetAllNotifications(ctx context.Context, query ent
 	}
 
 	return notifications, countData, totalPages, nil
-}
-
-func NewNotificationService(repo repository.NotificationRepositoryInterface, db *gorm.DB, logger *log.Logger) NotificationServiceInterface {
-	return &notificationService{repo: repo, db: db, logger: logger}
 }

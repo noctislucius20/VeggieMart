@@ -19,32 +19,33 @@ import (
 )
 
 func startConsumerWorker() {
-	customLogger := logger.NewLogger().Logger()
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	cfg := config.NewConfig()
-
-	db, err := cfg.ConnectionPostgres(ctx)
-	if err != nil {
-		customLogger.Fatalf("[StartConsumerWorker-1] %v", err.Error())
-		return
-	}
+	var (
+		customLogger = logger.NewLogger().Logger()
+		cfg          = config.NewConfig()
+		wg           sync.WaitGroup
+		ctx, cancel  = context.WithCancel(context.Background())
+	)
 
 	conn, err := cfg.NewRabbitMQ()
 	if err != nil {
-		customLogger.Fatalf("[StartConsumerWorker-2] %v", err.Error())
+		customLogger.Fatalf("[StartConsumerWorker-1] %v", err)
 		return
 	}
 
-	notificationRepo := repository.NewNotificationRepository(customLogger)
+	db, err := cfg.ConnectionPostgres(ctx)
+	if err != nil {
+		customLogger.Fatalf("[StartConsumerWorker-2] %v", err)
+		return
+	}
+
+	notificationRepo := repository.NewNotificationRepository(db.DB, customLogger)
+
+	txManager := repository.NewGormTransactionManager(db.DB)
 
 	emailService := message.NewEmailMessage(cfg)
-	notificationService := service.NewNotificationService(notificationRepo, db.DB, customLogger)
+	notificationService := service.NewNotificationService(notificationRepo, txManager, db.DB, customLogger)
 
-	var wg sync.WaitGroup
-
-	consumerWorker := consumer.NewNotificationConsumerWorker(emailService, notificationRepo, notificationService, conn, db.DB, customLogger)
+	consumerWorker := consumer.NewNotificationConsumerWorker(emailService, notificationRepo, txManager, notificationService, conn, db.DB, customLogger)
 
 	wg.Go(func() {
 		consumerWorker.StartCreateNotificationWorker(ctx, utils.NOTIF_EMAIL_VERIFICATION)

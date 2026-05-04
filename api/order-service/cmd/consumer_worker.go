@@ -15,19 +15,26 @@ import (
 )
 
 func startConsumerWorker() {
-	customLogger := logger.NewLogger().Logger()
+	var (
+		customLogger = logger.NewLogger().Logger()
+		cfg          = config.NewConfig()
+		wg           sync.WaitGroup
+		ctx, cancel  = context.WithCancel(context.Background())
+	)
 
-	conn, err := config.NewConfig().NewRabbitMQ()
+	conn, err := cfg.NewRabbitMQ()
 	if err != nil {
 		customLogger.Fatalf("[StartConsumerWorker-1] %v", err.Error())
 		return
 	}
 
-	var wg sync.WaitGroup
+	esClient, err := cfg.NewElasticsearchClient()
+	if err != nil {
+		customLogger.Fatalf("[StartConsumerWorker-2] %v", err)
+		return
+	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	consumerWorker := consumer.NewOrderConsumerWorker(conn, customLogger)
+	consumerWorker := consumer.NewOrderConsumerWorker(conn, esClient, cfg, customLogger)
 
 	wg.Go(func() {
 		consumerWorker.StartCreateOrderWorker(ctx)
@@ -52,7 +59,7 @@ func startConsumerWorker() {
 
 	conn.Close()
 
-	customLogger.Infof("[StartConsumerWorker-2] shutting down consumer worker...")
+	customLogger.Infof("[StartConsumerWorker-3] shutting down consumer worker...")
 }
 
 var workerConsumerCmd = &cobra.Command{

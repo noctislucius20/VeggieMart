@@ -15,25 +15,43 @@ import (
 )
 
 type NotificationRepositoryInterface interface {
-	GetAllNotifications(ctx context.Context, query entity.NotificationQueryString, db *gorm.DB) ([]entity.NotificationEntity, int64, int64, error)
-	GetNotificationById(ctx context.Context, notificationId uint, db *gorm.DB) (*entity.NotificationEntity, error)
-	CreateNotification(ctx context.Context, notification entity.NotificationEntity, db *gorm.DB) error
-	MarkAsSentNotification(ctx context.Context, notificationId uint, db *gorm.DB) error
-	MarkAsReadNotification(ctx context.Context, notificationId uint, db *gorm.DB) error
+	GetAllNotifications(ctx context.Context, query entity.NotificationQueryString) ([]entity.NotificationEntity, int64, int64, error)
+	GetNotificationById(ctx context.Context, notificationId uint) (*entity.NotificationEntity, error)
+	CreateNotification(ctx context.Context, notification entity.NotificationEntity) error
+	MarkAsSentNotification(ctx context.Context, notificationId uint) error
+	MarkAsReadNotification(ctx context.Context, notificationId uint) error
+
+	getDB(ctx context.Context) *gorm.DB
 }
 
 type notificationRepository struct {
+	db     *gorm.DB
 	logger *log.Logger
 }
 
-// MarkAsReadNotification implements [NotificationRepositoryInterface].
-func (n *notificationRepository) MarkAsReadNotification(ctx context.Context, notificationId uint, db *gorm.DB) error {
-	now := time.Now()
+func NewNotificationRepository(db *gorm.DB, logger *log.Logger) NotificationRepositoryInterface {
+	return &notificationRepository{db: db, logger: logger}
+}
 
-	modelNotification := model.Notification{
-		ID:     notificationId,
-		ReadAt: &now,
+// getDB implements [NotificationRepositoryInterface].
+func (n *notificationRepository) getDB(ctx context.Context) *gorm.DB {
+	if tx, ok := ctx.Value(txKey{}).(*gorm.DB); ok {
+		return tx
 	}
+
+	return n.db
+}
+
+// MarkAsReadNotification implements [NotificationRepositoryInterface].
+func (n *notificationRepository) MarkAsReadNotification(ctx context.Context, notificationId uint) error {
+	var (
+		db                = n.getDB(ctx)
+		now               = time.Now()
+		modelNotification = model.Notification{
+			ID:     notificationId,
+			ReadAt: &now,
+		}
+	)
 
 	if err := db.WithContext(ctx).Updates(&modelNotification).Error; err != nil {
 		n.logger.Errorf("[NotificationRepository-1] MarkAsReadNotification: %v", err.Error())
@@ -44,11 +62,14 @@ func (n *notificationRepository) MarkAsReadNotification(ctx context.Context, not
 }
 
 // MarkAsSentNotification implements [NotificationRepositoryInterface].
-func (n *notificationRepository) MarkAsSentNotification(ctx context.Context, notificationId uint, db *gorm.DB) error {
-	modelNotification := model.Notification{
-		ID:     notificationId,
-		Status: "SENT",
-	}
+func (n *notificationRepository) MarkAsSentNotification(ctx context.Context, notificationId uint) error {
+	var (
+		db                = n.getDB(ctx)
+		modelNotification = model.Notification{
+			ID:     notificationId,
+			Status: "SENT",
+		}
+	)
 
 	if err := db.WithContext(ctx).Updates(&modelNotification).Error; err != nil {
 		n.logger.Errorf("[NotificationRepository-1] MarkAsSentNotification: %v", err.Error())
@@ -59,18 +80,20 @@ func (n *notificationRepository) MarkAsSentNotification(ctx context.Context, not
 }
 
 // CreateNotification implements [NotificationRepositoryInterface].
-func (n *notificationRepository) CreateNotification(ctx context.Context, notification entity.NotificationEntity, db *gorm.DB) error {
-	now := time.Now()
-
-	modelNotification := model.Notification{
-		ReceiverID:       notification.ReceiverID,
-		Subject:          notification.Subject,
-		Status:           notification.Status,
-		SentAt:           &now,
-		ReadAt:           notification.ReadAt,
-		Message:          notification.Message,
-		NotificationType: notification.NotificationType,
-	}
+func (n *notificationRepository) CreateNotification(ctx context.Context, notification entity.NotificationEntity) error {
+	var (
+		db                = n.getDB(ctx)
+		now               = time.Now()
+		modelNotification = model.Notification{
+			ReceiverID:       notification.ReceiverID,
+			Subject:          notification.Subject,
+			Status:           notification.Status,
+			SentAt:           &now,
+			ReadAt:           notification.ReadAt,
+			Message:          notification.Message,
+			NotificationType: notification.NotificationType,
+		}
+	)
 
 	if err := db.WithContext(ctx).Create(&modelNotification).Error; err != nil {
 		n.logger.Errorf("[NotificationRepository-1] CreateNotification: %v", err.Error())
@@ -81,8 +104,11 @@ func (n *notificationRepository) CreateNotification(ctx context.Context, notific
 }
 
 // GetNotificationById implements [NotificationRepositoryInterface].
-func (n *notificationRepository) GetNotificationById(ctx context.Context, notificationId uint, db *gorm.DB) (*entity.NotificationEntity, error) {
-	modelNotification := model.Notification{}
+func (n *notificationRepository) GetNotificationById(ctx context.Context, notificationId uint) (*entity.NotificationEntity, error) {
+	var (
+		db                = n.getDB(ctx)
+		modelNotification model.Notification
+	)
 
 	sqlMain := db.WithContext(ctx).
 		Where("id = ?", notificationId).
@@ -108,8 +134,11 @@ func (n *notificationRepository) GetNotificationById(ctx context.Context, notifi
 }
 
 // GetAllNotifications implements [NotificationRepositoryInterface].
-func (n *notificationRepository) GetAllNotifications(ctx context.Context, query entity.NotificationQueryString, db *gorm.DB) ([]entity.NotificationEntity, int64, int64, error) {
-	modelNotifications := []model.Notification{}
+func (n *notificationRepository) GetAllNotifications(ctx context.Context, query entity.NotificationQueryString) ([]entity.NotificationEntity, int64, int64, error) {
+	var (
+		db                 = n.getDB(ctx)
+		modelNotifications []model.Notification
+	)
 
 	var countData int64
 
@@ -154,8 +183,4 @@ func (n *notificationRepository) GetAllNotifications(ctx context.Context, query 
 	}
 
 	return entities, countData, int64(totalPages), nil
-}
-
-func NewNotificationRepository(logger *log.Logger) NotificationRepositoryInterface {
-	return &notificationRepository{logger: logger}
 }

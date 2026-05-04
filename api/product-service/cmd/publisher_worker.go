@@ -7,7 +7,6 @@ import (
 	"product-service/config"
 	"product-service/internal/adapter/message/publisher"
 	"product-service/internal/adapter/repository"
-	"product-service/internal/core/service/transaction"
 	"product-service/utils/logger"
 	"sync"
 	"syscall"
@@ -21,18 +20,13 @@ func startPublisherWorker() {
 		customLogger = logger.NewLogger().Logger()
 		cfg          = config.NewConfig()
 		wg           sync.WaitGroup
-		txManager    transaction.TransactionManager
+		ctx, cancel  = context.WithCancel(context.Background())
 	)
 
 	conn, err := config.NewConfig().NewRabbitMQ()
 	if err != nil {
-		customLogger.Fatalf("[PublisherWorker-1] %v", err.Error())
+		customLogger.Fatalf("[PublisherWorker-1] %v", err)
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
 	db, err := cfg.ConnectionPostgres(ctx)
 	if err != nil {
@@ -42,9 +36,14 @@ func startPublisherWorker() {
 
 	outboxRepo := repository.NewOutboxEventRepository(db.DB, customLogger)
 
+	txManager := repository.NewGormTransactionManager(db.DB)
+
 	wg.Go(func() {
 		publisher.NewStartPublisherWorker(conn, outboxRepo, txManager, customLogger).StartPublisherWorker(ctx)
 	})
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
 	<-quit
 

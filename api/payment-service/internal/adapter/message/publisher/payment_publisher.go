@@ -27,7 +27,12 @@ type startPublisherWorker struct {
 }
 
 func NewStartPublisherWorker(conn *amqp.Connection, repoOutbox repository.OutboxEventInterface, txManager transaction.TransactionManager, logger *log.Logger) StartPublisherWorkerInterface {
-	return &startPublisherWorker{conn: conn, txManager: txManager, repoOutbox: repoOutbox, logger: logger}
+	return &startPublisherWorker{
+		conn:       conn,
+		txManager:  txManager,
+		repoOutbox: repoOutbox,
+		logger:     logger,
+	}
 }
 
 // StartPublisherWorker implements StartPublisherWorkerInterface.
@@ -71,7 +76,7 @@ func (s *startPublisherWorker) startPoller(ctx context.Context, jobs chan<- enti
 
 				return nil
 			}); err != nil {
-				s.logger.Errorf("[StartPublisherWorker-2] startPoller: %v", err)
+				s.logger.Errorf("[StartPublisherWorker-1] startPoller: %v", err)
 				return
 			}
 

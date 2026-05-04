@@ -9,7 +9,6 @@ import (
 	"notification-service/utils/logger"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -18,13 +17,13 @@ import (
 )
 
 func RunServer() {
-	dbCtx, dbCancel := context.WithCancel(context.Background())
+	serviceCtx, serviceCancel := context.WithCancel(context.Background())
 
 	customLogger := logger.NewLogger()
 
 	cfg := config.NewConfig()
 
-	db, err := cfg.ConnectionPostgres(dbCtx)
+	db, err := cfg.ConnectionPostgres(serviceCtx)
 	if err != nil {
 		customLogger.Logger().Fatalf("[RunServer-1] %v", err.Error())
 		return
@@ -39,11 +38,17 @@ func RunServer() {
 		LogValuesFunc: customLogger.RequestLogger,
 	}))
 
-	notificationRepo := repository.NewNotificationRepository(customLogger.Logger())
+	txManager := repository.NewGormTransactionManager(db.DB)
 
-	notificationService := service.NewNotificationService(notificationRepo, db.DB, customLogger.Logger())
+	notificationRepo := repository.NewNotificationRepository(db.DB, customLogger.Logger())
+
+	notificationService := service.NewNotificationService(notificationRepo, txManager, db.DB, customLogger.Logger())
 
 	handler.NewNotificationHandler(notificationService, e, cfg)
+
+	e.GET("/api/check", func(c echo.Context) error {
+		return c.String(200, "OK")
+	})
 
 	go func() {
 		if cfg.App.AppPort == "" {
@@ -57,8 +62,6 @@ func RunServer() {
 		}
 	}()
 
-	var wg sync.WaitGroup
-
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
@@ -66,16 +69,13 @@ func RunServer() {
 
 	customLogger.Logger().Infof("[RunServer-3] shutting down server on 5 seconds...")
 
-	dbCancel()
-
-	wg.Wait()
+	serviceCancel()
 
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
 		5*time.Second,
 	)
+	defer cancel()
 
 	e.Shutdown(ctx)
-
-	cancel()
 }

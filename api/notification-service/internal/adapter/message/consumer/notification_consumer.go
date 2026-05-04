@@ -7,6 +7,7 @@ import (
 	"notification-service/internal/adapter/repository"
 	"notification-service/internal/core/domain/entity"
 	"notification-service/internal/core/service"
+	"notification-service/internal/core/service/transaction"
 	"notification-service/utils"
 
 	"github.com/labstack/gommon/log"
@@ -24,9 +25,22 @@ type notificationConsumerWorker struct {
 	conn                *amqp091.Connection
 	emailService        message.EmailMessageInterface
 	repoNotification    repository.NotificationRepositoryInterface
+	txManager           transaction.TransactionManager
 	serviceNotification service.NotificationServiceInterface
 	db                  *gorm.DB
 	logger              *log.Logger
+}
+
+func NewNotificationConsumerWorker(emailService message.EmailMessageInterface, repoNotification repository.NotificationRepositoryInterface, txManager transaction.TransactionManager, serviceNotification service.NotificationServiceInterface, conn *amqp091.Connection, db *gorm.DB, logger *log.Logger) NotificationConsumerWorkerInterface {
+	return &notificationConsumerWorker{
+		emailService:        emailService,
+		repoNotification:    repoNotification,
+		txManager:           txManager,
+		serviceNotification: serviceNotification,
+		conn:                conn,
+		db:                  db,
+		logger:              logger,
+	}
 }
 
 // sendNotification implements [NotificationConsumerWorkerInterface].
@@ -91,8 +105,8 @@ func (n *notificationConsumerWorker) StartCreateNotificationWorker(ctx context.C
 				notification.Status = "SENT"
 			}
 
-			if err := n.db.Transaction(func(tx *gorm.DB) error {
-				if err := n.repoNotification.CreateNotification(ctx, notification, tx); err != nil {
+			if err := n.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+				if err := n.repoNotification.CreateNotification(txCtx, notification); err != nil {
 					return err
 				}
 
@@ -108,16 +122,5 @@ func (n *notificationConsumerWorker) StartCreateNotificationWorker(ctx context.C
 
 			n.logger.Infof("[NotificationConsumer-8] StartCreateNotificationWorker: email has been sent to %v", *notification.ReceiverEmail)
 		}
-	}
-}
-
-func NewNotificationConsumerWorker(emailService message.EmailMessageInterface, repoNotification repository.NotificationRepositoryInterface, serviceNotification service.NotificationServiceInterface, conn *amqp091.Connection, db *gorm.DB, logger *log.Logger) NotificationConsumerWorkerInterface {
-	return &notificationConsumerWorker{
-		emailService:        emailService,
-		repoNotification:    repoNotification,
-		serviceNotification: serviceNotification,
-		conn:                conn,
-		db:                  db,
-		logger:              logger,
 	}
 }

@@ -44,7 +44,9 @@ func NewCategoryService(repo repository.CategoryRepositoryInterface, redisClient
 
 // GetBatchCategories implements [CategoryServiceInterface].
 func (c *categoryService) GetBatchCategories(ctx context.Context, categoryIds []int64) (map[int64]entity.CategoryEntity, error) {
-	var categoriesMap map[int64]entity.CategoryEntity
+	var (
+		categoriesMap = make(map[int64]entity.CategoryEntity)
+	)
 
 	if err := c.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
 		categoryEntities, err := c.repo.GetBatchCategories(txCtx, categoryIds)

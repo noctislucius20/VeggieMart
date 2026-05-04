@@ -5,7 +5,6 @@ import (
 	"order-service/config"
 	"order-service/internal/adapter/message/publisher"
 	"order-service/internal/adapter/repository"
-	"order-service/internal/core/service/transaction"
 	"order-service/utils/logger"
 	"os"
 	"os/signal"
@@ -13,7 +12,6 @@ import (
 	"syscall"
 
 	"github.com/labstack/gommon/color"
-	"github.com/labstack/gommon/log"
 	"github.com/spf13/cobra"
 )
 
@@ -22,29 +20,29 @@ func startPublisherWorker() {
 		customLogger = logger.NewLogger().Logger()
 		cfg          = config.NewConfig()
 		wg           sync.WaitGroup
-		txManager    transaction.TransactionManager
+		ctx, cancel  = context.WithCancel(context.Background())
 	)
 
 	conn, err := config.NewConfig().NewRabbitMQ()
 	if err != nil {
-		customLogger.Fatalf("[PublisherWorker-1] %v", err.Error())
+		customLogger.Fatalf("[PublisherWorker-1] %v", err)
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
 	db, err := cfg.ConnectionPostgres(ctx)
 	if err != nil {
-		log.Fatalf("[PublisherWorker-2] %v", err.Error())
+		customLogger.Fatalf("[PublisherWorker-2] %v", err)
 	}
 
 	outboxRepo := repository.NewOutboxEventRepository(db.DB, customLogger)
 
+	txManager := repository.NewGormTransactionManager(db.DB)
+
 	wg.Go(func() {
 		publisher.NewStartPublisherWorker(conn, outboxRepo, txManager, customLogger).StartPublisherWorker(ctx)
 	})
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
 	<-quit
 

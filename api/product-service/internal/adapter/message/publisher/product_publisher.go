@@ -31,7 +31,8 @@ func NewStartPublisherWorker(conn *amqp.Connection, repoOutbox repository.Outbox
 		conn:       conn,
 		repoOutbox: repoOutbox,
 		txManager:  txManager,
-		logger:     logger}
+		logger:     logger,
+	}
 }
 
 // StartPublisherWorker implements StartPublisherWorkerInterface.
@@ -51,10 +52,9 @@ func (s *startPublisherWorker) StartPublisherWorker(ctx context.Context) {
 		})
 	}
 
-	close(jobChan)
-
 	wg.Wait()
 
+	close(jobChan)
 }
 
 func (s *startPublisherWorker) startPoller(ctx context.Context, jobs chan<- entity.OutboxEventEntity) {
@@ -76,7 +76,7 @@ func (s *startPublisherWorker) startPoller(ctx context.Context, jobs chan<- enti
 
 				return nil
 			}); err != nil {
-				s.logger.Errorf("[StartPublisherWorker-2] startPoller: %v", err)
+				s.logger.Errorf("[StartPublisherWorker-1] startPoller: %v", err)
 				return
 			}
 

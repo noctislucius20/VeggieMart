@@ -12,37 +12,37 @@ import (
 	"user-service/utils/logger"
 
 	"github.com/labstack/gommon/color"
-	"github.com/labstack/gommon/log"
 	"github.com/spf13/cobra"
 )
 
 func startPublisherWorker() {
-	customLogger := logger.NewLogger().Logger()
+	var (
+		customLogger = logger.NewLogger().Logger()
+		cfg          = config.NewConfig()
+		wg           sync.WaitGroup
+		ctx, cancel  = context.WithCancel(context.Background())
+	)
 
 	conn, err := config.NewConfig().NewRabbitMQ()
 	if err != nil {
-		customLogger.Fatalf("[PublisherWorker-1] %v", err.Error())
+		customLogger.Fatalf("[PublisherWorker-1] %v", err)
 	}
-
-	var wg sync.WaitGroup
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	cfg := config.NewConfig()
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
 	db, err := cfg.ConnectionPostgres(ctx)
 	if err != nil {
-		log.Fatalf("[PublisherWorker-2] %v", err.Error())
+		customLogger.Fatalf("[PublisherWorker-2] %v", err)
 	}
 
 	outboxRepo := repository.NewOutboxEventRepository(db.DB, customLogger)
 
+	txManager := repository.NewGormTransactionManager(db.DB)
+
 	wg.Go(func() {
-		publisher.NewStartPublisherWorker(db.DB, conn, outboxRepo, customLogger).StartPublisherWorker(ctx)
+		publisher.NewStartPublisherWorker(conn, txManager, outboxRepo, customLogger).StartPublisherWorker(ctx)
 	})
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
 	<-quit
 
