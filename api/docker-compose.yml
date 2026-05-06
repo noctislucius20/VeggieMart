@@ -1,0 +1,234 @@
+services:
+  user-db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: user_service
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - postgres_user_data:/var/lib/postgreql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - user-db-net
+
+  user-service:
+    build: 
+      context: ./user-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./user-service/.env
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    depends_on:
+      - user-db
+      - redis
+      - rabbitmq
+      - elasticsearch
+    networks:
+      - user-db-net
+      - redis-net
+      - rabbitmq-net
+      - elasticsearch-net
+
+  product-db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: product_service
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - postgres_product_data:/var/lib/postgreql/data
+    ports:
+      - "5433:5432"
+    networks:
+      - product-db-net
+
+  product-service:
+    build: 
+      context: ./product-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./product-service/.env
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+    depends_on:
+      - product-db
+      - redis
+      - rabbitmq
+      - elasticsearch
+    networks:
+      - product-db-net
+      - redis-net
+      - rabbitmq-net
+      - elasticsearch-net
+
+  order-db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: order_service
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - postgres_order_data:/var/lib/postgreql/data
+    ports:
+      - "5434:5432"
+    networks:
+      - order-db-net
+  
+  order-service:
+    build: 
+      context: ./order-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./order-service/.env
+    ports:
+      - "8082:8082"
+    restart: unless-stopped
+    depends_on:
+      - order-db
+      - redis
+      - rabbitmq
+      - elasticsearch
+      - user-service
+      - product-service
+    networks:
+      - order-db-net
+      - redis-net
+      - rabbitmq-net
+      - elasticsearch-net
+
+  payment-db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: payment_service
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - postgres_payment_data:/var/lib/postgreql/data
+    ports:
+      - "5435:5432"
+    networks:
+      - payment-db-net
+
+  payment-service:
+    build: 
+      context: ./payment-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./payment-service/.env
+    ports:
+      - "8083:8083"
+    restart: unless-stopped
+    depends_on:
+      - payment-db
+      - redis
+      - rabbitmq
+      - elasticsearch
+      - user-service
+      - product-service
+      - order-service
+    networks:
+      - payment-db-net
+      - redis-net
+      - rabbitmq-net
+      - elasticsearch-net
+
+  notification-db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: notification_service
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - postgres_notification_data:/var/lib/postgreql/data
+    ports:
+      - "5436:5432"
+    networks:
+      - notification-db
+
+  notification-service:
+    build: 
+      context: ./notification-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./notification-service/.env
+    ports:
+      - "8084:8084"
+    restart: unless-stopped
+    depends_on:
+      - notification-db
+      - redis
+      - rabbitmq
+      - elasticsearch
+    networks:
+      - notification-db-net
+      - redis-net
+      - rabbitmq-net
+      - elasticsearch-net
+
+  redis:
+    image: redis:8.4
+    restart: unless-stopped
+    ports:
+    - "6379:6379"
+    networks:
+    - redis-net
+
+  rabbitmq:
+    image: rabbitmq:4.3.0-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RBMQ_USER}
+      RABBITMQ_DEFAULT_PASSWORD: ${RBMQ_PASS}
+    networks:
+      - rabbitmq-net
+  
+  elasticsearch:
+    image: elasticsearch:7.17.10
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    restart: unless-stopped
+    networks:
+      - elasticsearch-net
+
+volumes:
+  postgres_user_data:
+  postgres_product_data:
+  postgres_order_data:
+  postgres_payment_data:
+  postgres_notification_data:
+
+networks:
+  user-db-net:
+  product-db-net:
+  order-db-net:
+  payment-db-net:
+  notification-db-net:
+  redis-net:
+  rabbitmq-net:
+  elasticsearch-net:
