@@ -11,7 +11,7 @@ services:
     volumes:
       - postgres_user_data:/var/lib/postgreql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     networks:
       - user-db-net
 
@@ -47,7 +47,7 @@ services:
     volumes:
       - postgres_product_data:/var/lib/postgreql/data
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     networks:
       - product-db-net
 
@@ -83,7 +83,7 @@ services:
     volumes:
       - postgres_order_data:/var/lib/postgreql/data
     ports:
-      - "5434:5432"
+      - "127.0.0.1:5434:5432"
     networks:
       - order-db-net
   
@@ -121,7 +121,7 @@ services:
     volumes:
       - postgres_payment_data:/var/lib/postgreql/data
     ports:
-      - "5435:5432"
+      - "127.0.0.1:5435:5432"
     networks:
       - payment-db-net
 
@@ -160,7 +160,7 @@ services:
     volumes:
       - postgres_notification_data:/var/lib/postgreql/data
     ports:
-      - "5436:5432"
+      - "127.0.0.1:5436:5432"
     networks:
       - notification-db
 
@@ -188,15 +188,15 @@ services:
     image: redis:8.4
     restart: unless-stopped
     ports:
-    - "6379:6379"
+    - "127.0.0.1:6379:6379"
     networks:
     - redis-net
 
   rabbitmq:
     image: rabbitmq:4.3.0-management
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RBMQ_USER}
@@ -210,8 +210,8 @@ services:
       - discovery.type=single-node
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     ports:
-      - "9200:9200"
-      - "9300:9300"
+      - "127.0.0.1:9200:9200"
+      - "127.0.0.1:9300:9300"
     restart: unless-stopped
     networks:
       - elasticsearch-net
