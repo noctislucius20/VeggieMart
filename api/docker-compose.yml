@@ -4,12 +4,12 @@ services:
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASS}
-      POSTGRES_DB: user_service
+      POSTGRES_DB: user-service
     env_file:
       - .env
     restart: unless-stopped
     volumes:
-      - postgres_user_data:/var/lib/postgreql/data
+      - postgres_user_data:/var/lib/postgresql
     ports:
       - "127.0.0.1:5432:5432"
     networks:
@@ -23,6 +23,26 @@ services:
       - ./user-service/.env
     ports:
       - "8080:8080"
+    command: ["./app", "start"]
+    restart: unless-stopped
+    depends_on:
+      - user-db
+      - redis
+      - rabbitmq
+      - elasticsearch
+    networks:
+      - user-db-net
+      - redis-net
+      - rabbitmq-net
+      - elasticsearch-net
+  
+  user-publisher-worker:
+    build: 
+      context: ./user-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./user-service/.env
+    command: ["./app", "publisher-worker"]
     restart: unless-stopped
     depends_on:
       - user-db
@@ -40,12 +60,12 @@ services:
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASS}
-      POSTGRES_DB: product_service
+      POSTGRES_DB: product-service
     env_file:
       - .env
     restart: unless-stopped
     volumes:
-      - postgres_product_data:/var/lib/postgreql/data
+      - postgres_product_data:/var/lib/postgresql
     ports:
       - "127.0.0.1:5433:5432"
     networks:
@@ -71,17 +91,55 @@ services:
       - rabbitmq-net
       - elasticsearch-net
 
+  product-publisher-worker:
+    build: 
+      context: ./product-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./product-service/.env
+    command: ["./app", "publisher-worker"]
+    restart: unless-stopped
+    depends_on:
+      - product-db
+      - redis
+      - rabbitmq
+      - elasticsearch
+    networks:
+      - product-db-net
+      - redis-net
+      - rabbitmq-net
+      - elasticsearch-net
+
+  product-consumer-worker:
+    build: 
+      context: ./product-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./product-service/.env
+    command: ["./app", "consumer-worker"]
+    restart: unless-stopped
+    depends_on:
+      - product-db
+      - redis
+      - rabbitmq
+      - elasticsearch
+    networks:
+      - product-db-net
+      - redis-net
+      - rabbitmq-net
+      - elasticsearch-net
+
   order-db:
     image: postgres:18
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASS}
-      POSTGRES_DB: order_service
+      POSTGRES_DB: order-service
     env_file:
       - .env
     restart: unless-stopped
     volumes:
-      - postgres_order_data:/var/lib/postgreql/data
+      - postgres_order_data:/var/lib/postgresql
     ports:
       - "127.0.0.1:5434:5432"
     networks:
@@ -109,17 +167,59 @@ services:
       - rabbitmq-net
       - elasticsearch-net
 
+  order-publisher-worker:
+    build: 
+      context: ./order-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./order-service/.env
+    command: ["./app", "publisher-worker"]
+    restart: unless-stopped
+    depends_on:
+      - order-db
+      - redis
+      - rabbitmq
+      - elasticsearch
+      - user-service
+      - product-service
+    networks:
+      - order-db-net
+      - redis-net
+      - rabbitmq-net
+      - elasticsearch-net
+
+  order-consumer-worker:
+    build: 
+      context: ./order-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./order-service/.env
+    command: ["./app", "consumer-worker"]
+    restart: unless-stopped
+    depends_on:
+      - order-db
+      - redis
+      - rabbitmq
+      - elasticsearch
+      - user-service
+      - product-service
+    networks:
+      - order-db-net
+      - redis-net
+      - rabbitmq-net
+      - elasticsearch-net
+
   payment-db:
     image: postgres:18
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASS}
-      POSTGRES_DB: payment_service
+      POSTGRES_DB: payment-service
     env_file:
       - .env
     restart: unless-stopped
     volumes:
-      - postgres_payment_data:/var/lib/postgreql/data
+      - postgres_payment_data:/var/lib/postgresql
     ports:
       - "127.0.0.1:5435:5432"
     networks:
@@ -147,22 +247,44 @@ services:
       - redis-net
       - rabbitmq-net
       - elasticsearch-net
+  
+  payment-publisher-worker:
+    build: 
+      context: ./payment-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./payment-service/.env
+    command: ["./app", "publisher-worker"]
+    restart: unless-stopped
+    depends_on:
+      - payment-db
+      - redis
+      - rabbitmq
+      - elasticsearch
+      - user-service
+      - product-service
+      - order-service
+    networks:
+      - payment-db-net
+      - redis-net
+      - rabbitmq-net
+      - elasticsearch-net
 
   notification-db:
     image: postgres:18
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASS}
-      POSTGRES_DB: notification_service
+      POSTGRES_DB: notification-service
     env_file:
       - .env
     restart: unless-stopped
     volumes:
-      - postgres_notification_data:/var/lib/postgreql/data
+      - postgres_notification_data:/var/lib/postgresql
     ports:
       - "127.0.0.1:5436:5432"
     networks:
-      - notification-db
+      - notification-db-net
 
   notification-service:
     build: 
@@ -172,6 +294,25 @@ services:
       - ./notification-service/.env
     ports:
       - "8084:8084"
+    restart: unless-stopped
+    depends_on:
+      - notification-db
+      - redis
+      - rabbitmq
+      - elasticsearch
+    networks:
+      - notification-db-net
+      - redis-net
+      - rabbitmq-net
+      - elasticsearch-net
+  
+  notification-consumer-worker:
+    build: 
+      context: ./notification-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./notification-service/.env
+    command: ["./app", "consumer-worker"]
     restart: unless-stopped
     depends_on:
       - notification-db
