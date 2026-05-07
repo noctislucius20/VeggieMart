@@ -48,7 +48,7 @@ func (n *notificationConsumerWorker) sendNotification(ctx context.Context, notif
 	switch notification.NotificationType {
 	case "EMAIL":
 		if err := n.emailService.SendEmailNotification(*notification.ReceiverEmail, *notification.Subject, notification.Message); err != nil {
-			n.logger.Errorf("[NotificationConsumer-1] sendNotification: %v", err.Error())
+			n.logger.Errorf("[NotificationConsumer-1] sendNotification: %v", err)
 			return
 		}
 	case "PUSH":
@@ -64,7 +64,7 @@ func (n *notificationConsumerWorker) sendNotification(ctx context.Context, notif
 func (n *notificationConsumerWorker) StartCreateNotificationWorker(ctx context.Context, queueName string) {
 	ch, err := n.conn.Channel()
 	if err != nil {
-		n.logger.Errorf("[NotificationConsumer-1] StartCreateNotificationWorker: %v", err.Error())
+		n.logger.Errorf("[NotificationConsumer-1] StartCreateNotificationWorker: %v", err)
 		return
 	}
 
@@ -72,13 +72,13 @@ func (n *notificationConsumerWorker) StartCreateNotificationWorker(ctx context.C
 
 	queue, err := ch.QueueDeclare(queueName, true, false, false, false, nil)
 	if err != nil {
-		n.logger.Errorf("[NotificationConsumer-2] StartCreateNotificationWorker: %v", err.Error())
+		n.logger.Errorf("[NotificationConsumer-2] StartCreateNotificationWorker: %v", err)
 		return
 	}
 
 	msgs, err := ch.Consume(queue.Name, "", true, false, false, false, nil)
 	if err != nil {
-		n.logger.Errorf("[NotificationConsumer-3] StartCreateNotificationWorker: %v", err.Error())
+		n.logger.Errorf("[NotificationConsumer-3] StartCreateNotificationWorker: %v", err)
 		return
 	}
 
@@ -96,7 +96,7 @@ func (n *notificationConsumerWorker) StartCreateNotificationWorker(ctx context.C
 
 			err := json.Unmarshal(d.Body, &notification)
 			if err != nil {
-				n.logger.Errorf("[NotificationConsumer-5] StartCreateNotificationWorker: %v", err.Error())
+				n.logger.Errorf("[NotificationConsumer-5] StartCreateNotificationWorker: %v", err)
 				continue
 			}
 

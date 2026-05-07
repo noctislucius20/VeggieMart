@@ -54,7 +54,7 @@ func (n *notificationRepository) MarkAsReadNotification(ctx context.Context, not
 	)
 
 	if err := db.WithContext(ctx).Updates(&modelNotification).Error; err != nil {
-		n.logger.Errorf("[NotificationRepository-1] MarkAsReadNotification: %v", err.Error())
+		n.logger.Errorf("[NotificationRepository-1] MarkAsReadNotification: %v", err)
 		return err
 	}
 
@@ -72,7 +72,7 @@ func (n *notificationRepository) MarkAsSentNotification(ctx context.Context, not
 	)
 
 	if err := db.WithContext(ctx).Updates(&modelNotification).Error; err != nil {
-		n.logger.Errorf("[NotificationRepository-1] MarkAsSentNotification: %v", err.Error())
+		n.logger.Errorf("[NotificationRepository-1] MarkAsSentNotification: %v", err)
 		return err
 	}
 
@@ -96,7 +96,7 @@ func (n *notificationRepository) CreateNotification(ctx context.Context, notific
 	)
 
 	if err := db.WithContext(ctx).Create(&modelNotification).Error; err != nil {
-		n.logger.Errorf("[NotificationRepository-1] CreateNotification: %v", err.Error())
+		n.logger.Errorf("[NotificationRepository-1] CreateNotification: %v", err)
 		return err
 	}
 
@@ -118,7 +118,7 @@ func (n *notificationRepository) GetNotificationById(ctx context.Context, notifi
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			err = errors.New(utils.DATA_NOT_FOUND)
 		}
-		n.logger.Errorf("[NotificationRepository-1] GetNotificationById: %v", err.Error())
+		n.logger.Errorf("[NotificationRepository-1] GetNotificationById: %v", err)
 		return nil, err
 	}
 
@@ -157,7 +157,7 @@ func (n *notificationRepository) GetAllNotifications(ctx context.Context, query 
 	}
 
 	if err := sqlMain.Model(&modelNotifications).Count(&countData).Error; err != nil {
-		n.logger.Errorf("[NotificationRepository-1] GetAllNotifications: %v", err.Error())
+		n.logger.Errorf("[NotificationRepository-1] GetAllNotifications: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -168,7 +168,7 @@ func (n *notificationRepository) GetAllNotifications(ctx context.Context, query 
 		Limit(int(query.Limit)).
 		Offset(int(offset)).
 		Find(&modelNotifications).Error; err != nil {
-		n.logger.Errorf("[NotificationRepository-2] GetAllNotifications: %v", err.Error())
+		n.logger.Errorf("[NotificationRepository-2] GetAllNotifications: %v", err)
 		return nil, 0, 0, err
 	}
 

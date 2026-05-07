@@ -90,7 +90,7 @@ func (n *notificationHandler) GetNotificationById(c echo.Context) error {
 
 	result, err := n.notificationService.GetNotificationById(ctx, uint(id))
 	if err != nil {
-		c.Logger().Errorf("[NotificationHandler-4] GetNotificationById: %v", err.Error())
+		c.Logger().Errorf("[NotificationHandler-4] GetNotificationById: %v", err)
 		if err.Error() == utils.DATA_NOT_FOUND {
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
 		}
@@ -150,13 +150,13 @@ func (n *notificationHandler) GetAllNotifications(c echo.Context) error {
 
 	page, err := conv.ParseInt64QueryParam(c, "page", 1)
 	if err != nil {
-		c.Logger().Errorf("[NotificationHandler-3] GetAllNotifications: %v", err.Error())
+		c.Logger().Errorf("[NotificationHandler-3] GetAllNotifications: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	limit, err := conv.ParseInt64QueryParam(c, "limit", 10)
 	if err != nil {
-		c.Logger().Errorf("[NotificationHandler-4] GetAllNotifications: %v", err.Error())
+		c.Logger().Errorf("[NotificationHandler-4] GetAllNotifications: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -175,7 +175,7 @@ func (n *notificationHandler) GetAllNotifications(c echo.Context) error {
 
 	results, countData, totalPages, err := n.notificationService.GetAllNotifications(ctx, reqEntity)
 	if err != nil {
-		c.Logger().Errorf("[NotificationHandler-5] GetAllNotifications: %v", err.Error())
+		c.Logger().Errorf("[NotificationHandler-5] GetAllNotifications: %v", err)
 		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 	}
 

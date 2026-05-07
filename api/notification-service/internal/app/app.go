@@ -25,7 +25,7 @@ func RunServer() {
 
 	db, err := cfg.ConnectionPostgres(serviceCtx)
 	if err != nil {
-		customLogger.Logger().Fatalf("[RunServer-1] %v", err.Error())
+		customLogger.Logger().Fatalf("[RunServer-1] %v", err)
 		return
 	}
 
@@ -57,7 +57,7 @@ func RunServer() {
 
 		err := e.Start(":" + cfg.App.AppPort)
 		if err != nil {
-			customLogger.Logger().Fatalf("[RunServer-2] %v", err.Error())
+			customLogger.Logger().Fatalf("[RunServer-2] %v", err)
 			return
 		}
 	}()

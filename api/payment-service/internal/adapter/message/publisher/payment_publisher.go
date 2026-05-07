@@ -66,18 +66,23 @@ func (s *startPublisherWorker) startPoller(ctx context.Context, jobs chan<- enti
 		case <-ctx.Done():
 			return
 		case <-time.After(busyDelay):
-			var outboxes, err = []entity.OutboxEventEntity{}, errors.New("")
+			var (
+				outboxes []entity.OutboxEventEntity
+			)
 
 			if err := s.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-				outboxes, err = s.repoOutbox.GetAllPendingEvent(txCtx)
+				outboxEntities, err := s.repoOutbox.GetAllPendingEvent(txCtx)
 				if err != nil {
 					return err
 				}
 
+				outboxes = outboxEntities
+
 				return nil
 			}); err != nil {
 				s.logger.Errorf("[StartPublisherWorker-1] startPoller: %v", err)
-				return
+				time.Sleep(idleDelay)
+				continue
 			}
 
 			if len(outboxes) == 0 {
@@ -99,14 +104,14 @@ func (s *startPublisherWorker) startPoller(ctx context.Context, jobs chan<- enti
 func (s *startPublisherWorker) startPublisher(ctx context.Context, jobs <-chan entity.OutboxEventEntity) {
 	ch, err := s.conn.Channel()
 	if err != nil {
-		s.logger.Errorf("[StartPublisherWorker-1] startPublisher: %v", err)
+		s.logger.Fatalf("[StartPublisherWorker-1] startPublisher: %v", err)
 		return
 	}
 
 	defer ch.Close()
 
 	if err := ch.Confirm(false); err != nil {
-		s.logger.Errorf("[StartPublisherWorker-2] startPublisher: %v", err)
+		s.logger.Fatalf("[StartPublisherWorker-2] startPublisher: %v", err)
 		return
 	}
 
@@ -119,12 +124,12 @@ func (s *startPublisherWorker) startPublisher(ctx context.Context, jobs <-chan e
 		case outbox, ok := <-jobs:
 			if !ok {
 				s.logger.Infof("[StartPublisherWorker-3] startPublisher: job channel closed")
-				return
+				continue
 			}
 
 			if _, err = ch.QueueDeclare(outbox.EventType, true, false, false, false, nil); err != nil {
 				s.logger.Errorf("[StartPublisherWorker-4] startPublisher: %v", err)
-				return
+				continue
 			}
 
 			if err := s.publishOne(ctx, ch, confirms, outbox); err != nil {
@@ -136,7 +141,7 @@ func (s *startPublisherWorker) startPublisher(ctx context.Context, jobs <-chan e
 					return nil
 				}); err != nil {
 					s.logger.Errorf("[StartPublisherWorker-5] startPublisher: %v", err)
-					return
+					continue
 				}
 
 				continue
@@ -150,7 +155,7 @@ func (s *startPublisherWorker) startPublisher(ctx context.Context, jobs <-chan e
 				return nil
 			}); err != nil {
 				s.logger.Errorf("[StartPublisherWorker-6] startPublisher: %v", err)
-				return
+				continue
 			}
 		}
 	}

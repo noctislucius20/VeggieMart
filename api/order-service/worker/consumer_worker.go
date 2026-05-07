@@ -21,7 +21,7 @@ func StartConsumerWorker() {
 
 	conn, err := cfg.NewRabbitMQ()
 	if err != nil {
-		customLogger.Fatalf("[StartConsumerWorker-1] %v", err.Error())
+		customLogger.Fatalf("[StartConsumerWorker-1] %v", err)
 		return
 	}
 

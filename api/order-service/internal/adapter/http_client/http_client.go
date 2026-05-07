@@ -34,7 +34,7 @@ func (o *options) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	resp, err := http.DefaultTransport.RoundTrip(req)
 	if err != nil {
-		o.logger.Infof("Request failed: %v", err.Error())
+		o.logger.Infof("Request failed: %v", err)
 		return nil, err
 	}
 

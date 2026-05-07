@@ -227,7 +227,7 @@ func (u *userHandler) UpdateCustomerAdmin(c echo.Context) error {
 	}
 
 	if err := u.userService.UpdateCustomer(ctx, reqEntity); err != nil {
-		c.Logger().Errorf("[UserHandler-6] UpdateCustomerAdmin: %v", err.Error())
+		c.Logger().Errorf("[UserHandler-6] UpdateCustomerAdmin: %v", err)
 		switch err.Error() {
 		case utils.DATA_NOT_FOUND:
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))

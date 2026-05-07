@@ -50,7 +50,7 @@ func (n *notificationService) MarkAsReadNotification(ctx context.Context, notifi
 
 		return nil
 	}); err != nil {
-		n.logger.Errorf("[NotificationService-1] MarkAsReadNotification: %v", err.Error())
+		n.logger.Errorf("[NotificationService-1] MarkAsReadNotification: %v", err)
 		return err
 	}
 
@@ -91,7 +91,7 @@ func (n *notificationService) SendPushNotification(ctx context.Context, notifica
 
 		return nil
 	}); err != nil {
-		n.logger.Errorf("[NotificationService-2] SendPushNotification: %v", err.Error())
+		n.logger.Errorf("[NotificationService-2] SendPushNotification: %v", err)
 		return
 	}
 }
@@ -110,7 +110,7 @@ func (n *notificationService) GetNotificationById(ctx context.Context, notificat
 
 		return nil
 	}); err != nil {
-		n.logger.Errorf("[NotificationService-1] GetNotificationById: %v", err.Error())
+		n.logger.Errorf("[NotificationService-1] GetNotificationById: %v", err)
 		return nil, err
 	}
 
@@ -139,7 +139,7 @@ func (n *notificationService) GetAllNotifications(ctx context.Context, query ent
 
 		return nil
 	}); err != nil {
-		n.logger.Errorf("[NotificationService-1] GetAllNotifications: %v", err.Error())
+		n.logger.Errorf("[NotificationService-1] GetAllNotifications: %v", err)
 		return nil, 0, 0, err
 	}
 

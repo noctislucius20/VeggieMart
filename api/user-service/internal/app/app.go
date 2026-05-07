@@ -85,7 +85,7 @@ func RunServer() {
 
 		err = e.Start(":" + cfg.App.AppPort)
 		if err != nil {
-			customLogger.Logger().Fatalf("[RunServer-3] %v", err.Error())
+			customLogger.Logger().Fatalf("[RunServer-3] %v", err)
 			return
 		}
 	}()
