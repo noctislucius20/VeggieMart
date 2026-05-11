@@ -14,6 +14,12 @@ services:
       - "127.0.0.1:5432:5432"
     networks:
       - user-db-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
   user-service:
     build: 
@@ -26,10 +32,14 @@ services:
     command: ["./app", "start"]
     restart: unless-stopped
     depends_on:
-      - user-db
-      - redis
-      - rabbitmq
-      - elasticsearch
+      user-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     networks:
       - user-db-net
       - redis-net
@@ -45,10 +55,14 @@ services:
     command: ["./app", "publisher-worker"]
     restart: unless-stopped
     depends_on:
-      - user-db
-      - redis
-      - rabbitmq
-      - elasticsearch
+      user-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     networks:
       - user-db-net
       - redis-net
@@ -70,6 +84,12 @@ services:
       - "127.0.0.1:5433:5432"
     networks:
       - product-db-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
   product-service:
     build: 
@@ -81,10 +101,14 @@ services:
       - "8081:8081"
     restart: unless-stopped
     depends_on:
-      - product-db
-      - redis
-      - rabbitmq
-      - elasticsearch
+      product-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     networks:
       - product-db-net
       - redis-net
@@ -100,10 +124,14 @@ services:
     command: ["./app", "publisher-worker"]
     restart: unless-stopped
     depends_on:
-      - product-db
-      - redis
-      - rabbitmq
-      - elasticsearch
+      product-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     networks:
       - product-db-net
       - redis-net
@@ -119,10 +147,14 @@ services:
     command: ["./app", "consumer-worker"]
     restart: unless-stopped
     depends_on:
-      - product-db
-      - redis
-      - rabbitmq
-      - elasticsearch
+      product-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     networks:
       - product-db-net
       - redis-net
@@ -144,6 +176,12 @@ services:
       - "127.0.0.1:5434:5432"
     networks:
       - order-db-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
   
   order-service:
     build: 
@@ -155,12 +193,18 @@ services:
       - "8082:8082"
     restart: unless-stopped
     depends_on:
-      - order-db
-      - redis
-      - rabbitmq
-      - elasticsearch
-      - user-service
-      - product-service
+      order-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
     networks:
       - order-db-net
       - redis-net
@@ -176,12 +220,18 @@ services:
     command: ["./app", "publisher-worker"]
     restart: unless-stopped
     depends_on:
-      - order-db
-      - redis
-      - rabbitmq
-      - elasticsearch
-      - user-service
-      - product-service
+      order-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
     networks:
       - order-db-net
       - redis-net
@@ -197,12 +247,18 @@ services:
     command: ["./app", "consumer-worker"]
     restart: unless-stopped
     depends_on:
-      - order-db
-      - redis
-      - rabbitmq
-      - elasticsearch
-      - user-service
-      - product-service
+      order-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
     networks:
       - order-db-net
       - redis-net
@@ -224,6 +280,12 @@ services:
       - "127.0.0.1:5435:5432"
     networks:
       - payment-db-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
   payment-service:
     build: 
@@ -235,13 +297,20 @@ services:
       - "8083:8083"
     restart: unless-stopped
     depends_on:
-      - payment-db
-      - redis
-      - rabbitmq
-      - elasticsearch
-      - user-service
-      - product-service
-      - order-service
+      payment-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+      order-service:
+        condition: service_started
     networks:
       - payment-db-net
       - redis-net
@@ -257,13 +326,20 @@ services:
     command: ["./app", "publisher-worker"]
     restart: unless-stopped
     depends_on:
-      - payment-db
-      - redis
-      - rabbitmq
-      - elasticsearch
-      - user-service
-      - product-service
-      - order-service
+      payment-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+      order-service:
+        condition: service_started
     networks:
       - payment-db-net
       - redis-net
@@ -285,6 +361,12 @@ services:
       - "127.0.0.1:5436:5432"
     networks:
       - notification-db-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
   notification-service:
     build: 
@@ -296,10 +378,14 @@ services:
       - "8084:8084"
     restart: unless-stopped
     depends_on:
-      - notification-db
-      - redis
-      - rabbitmq
-      - elasticsearch
+      notification-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     networks:
       - notification-db-net
       - redis-net
@@ -315,10 +401,14 @@ services:
     command: ["./app", "consumer-worker"]
     restart: unless-stopped
     depends_on:
-      - notification-db
-      - redis
-      - rabbitmq
-      - elasticsearch
+      notification-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     networks:
       - notification-db-net
       - redis-net
@@ -332,6 +422,12 @@ services:
     - "127.0.0.1:6379:6379"
     networks:
     - redis-net
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   rabbitmq:
     image: rabbitmq:4.3.0-management
@@ -344,6 +440,12 @@ services:
       RABBITMQ_DEFAULT_PASSWORD: ${RBMQ_PASS}
     networks:
       - rabbitmq-net
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
   
   elasticsearch:
     image: elasticsearch:7.17.10
@@ -356,6 +458,12 @@ services:
     restart: unless-stopped
     networks:
       - elasticsearch-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -vq '\"status\":\"red\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
 
 volumes:
   postgres_user_data:
