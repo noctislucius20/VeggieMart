@@ -441,11 +441,11 @@ services:
     networks:
       - rabbitmq-net
     healthcheck:
-      test: ["CMD-SHELL", "rabbitmq-diagnostics ping"]
+      test: ["CMD-SHELL", "rabbitmqctl await_startup"]
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 10s
+      start_period: 20s
   
   elasticsearch:
     image: elasticsearch:7.17.10
