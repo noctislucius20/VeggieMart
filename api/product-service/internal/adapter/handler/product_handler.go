@@ -12,6 +12,7 @@ import (
 	"product-service/utils/conv"
 	"product-service/utils/logger"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -88,7 +89,7 @@ func (p *productHandler) GetDetailProductHome(c echo.Context) error {
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[ProductHandler-1] GetDetailProductHome: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
@@ -141,14 +142,20 @@ func (p *productHandler) GetAllProductsShop(c echo.Context) error {
 
 	search := c.QueryParam("search")
 
-	orderBy := c.QueryParam("order_by")
-	if orderBy == "" {
-		orderBy = "created_at"
-	}
-
-	orderType := c.QueryParam("order_type")
-	if orderType != "asc" && orderType != "desc" {
-		orderType = "desc"
+	orderBy := "created_at"
+	orderType := "desc"
+	if c.QueryParam("order_by") != "" {
+		switch strings.ToLower(c.QueryParam("order_by")) {
+		case "price_asc":
+			orderBy = "regular_price"
+			orderType = "asc"
+		case "price_desc":
+			orderBy = "regular_price"
+			orderType = "desc"
+		case "newest":
+			orderBy = "id"
+			orderType = "desc"
+		}
 	}
 
 	page, err := conv.ParseInt64QueryParam(c, "page", 1)
@@ -278,7 +285,7 @@ func (p *productHandler) DeleteProductAdmin(c echo.Context) error {
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[ProductHandler-2] DeleteProductAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
@@ -316,7 +323,7 @@ func (p *productHandler) UpdateProductAdmin(c echo.Context) error {
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[ProductHandler-2] UpdateProductAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
@@ -467,7 +474,7 @@ func (p *productHandler) GetProductByIdAdmin(c echo.Context) error {
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[ProductHandler-2] GetProductByIdAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)

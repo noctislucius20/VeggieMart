@@ -481,7 +481,7 @@ func (u *userService) ForgotPassword(ctx context.Context, req entity.UserEntity)
 			return err
 		}
 
-		urlForgot := fmt.Sprintf("%s/reset-password?token=%s", u.cfg.App.UrlUsersService, req.Token)
+		urlForgot := fmt.Sprintf("%s/auth/reset-password?token=%s", u.cfg.App.UrlFrontEnd, req.Token)
 		payloadMessage := fmt.Sprintf("Please click link below to reset your password: %v", urlForgot)
 
 		publishEmailPayload := map[string]any{
@@ -536,7 +536,7 @@ func (u *userService) CreateUserAccount(ctx context.Context, req entity.UserEnti
 			return err
 		}
 
-		urlVerify := fmt.Sprintf("%s/verify?token=%s", u.cfg.App.UrlUsersService, req.Token)
+		urlVerify := fmt.Sprintf("%s/auth/verify-account?token=%s", u.cfg.App.UrlFrontEnd, req.Token)
 
 		payloadMessage := fmt.Sprintf("Please click link below to activate your account: %v", urlVerify)
 

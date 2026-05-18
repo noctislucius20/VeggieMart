@@ -9,7 +9,8 @@ type App struct {
 	JwtSecretKey string `json:"jwt_secret_key"`
 	JwtIssuer    string `json:"jwt_issuer"`
 
-	UrlUsersService string `json:"URL_USERS_SERVICE"`
+	UrlUsersService string `json:"url_users_service"`
+	UrlFrontEnd     string `json:"url_front_end"`
 }
 
 type PsqlDB struct {
@@ -59,6 +60,7 @@ func NewConfig() *Config {
 			JwtIssuer:    viper.GetString("JWT_ISSUER"),
 
 			UrlUsersService: viper.GetString("URL_USERS_SERVICE"),
+			UrlFrontEnd:     viper.GetString("URL_FRONT_END"),
 		},
 
 		Psql: PsqlDB{

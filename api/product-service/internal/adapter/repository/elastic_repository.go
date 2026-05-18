@@ -26,6 +26,18 @@ type elasticRepository struct {
 func (e *elasticRepository) SearchProductElastic(ctx context.Context, query entity.QueryStringProduct) ([]entity.ProductEntity, int64, int64, error) {
 	offset := (query.Page - 1) * query.Limit
 
+	sortField := "id"
+	if query.OrderBy != "" {
+		sortField = query.OrderBy
+	}
+
+	sortOrder := "asc"
+	if query.OrderType == "desc" {
+		sortOrder = "desc"
+	}
+
+	sortQuery := fmt.Sprintf(`{ "%s": "%s" }`, sortField, sortOrder)
+
 	categoryFilter := ""
 	if query.CategoryID != 0 {
 		categoryFilter = fmt.Sprintf(`{ "match": { "category_id": "%d" } },`, query.CategoryID)
@@ -56,9 +68,9 @@ func (e *elasticRepository) SearchProductElastic(ctx context.Context, query enti
 			}
 		},
 		"sort": [
-			{ "id": "asc" }
+			%s
 		]
-	}`, offset, query.Limit, categoryFilter, searchFilter, priceFilter)
+	}`, offset, query.Limit, categoryFilter, searchFilter, priceFilter, sortQuery)
 
 	res, err := e.esClient.Search(
 		e.esClient.Search.WithContext(ctx),

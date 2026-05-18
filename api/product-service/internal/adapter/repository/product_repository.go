@@ -58,7 +58,7 @@ func (p *productRepository) GetBatchProducts(ctx context.Context, productIds []i
 
 		batchProducts := []model.Product{}
 		if err := db.WithContext(ctx).
-			Select("id", "image", "name", "sale_price", "weight", "unit").
+			Select("id", "image", "name", "sale_price", "weight", "unit", "status").
 			Where("id IN ?", productIds[i:end]).
 			Find(&batchProducts).Error; err != nil {
 			p.logger.Errorf("[ProductRepository-1] GetBatchProducts: %v", err)
@@ -80,6 +80,7 @@ func (p *productRepository) GetBatchProducts(ctx context.Context, productIds []i
 			ID:        val.ID,
 			Name:      val.Name,
 			Image:     val.Image,
+			Status:    val.Status,
 			SalePrice: val.SalePrice,
 			Weight:    val.Weight,
 			Unit:      val.Unit,

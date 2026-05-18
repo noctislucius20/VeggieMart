@@ -68,6 +68,7 @@ func RunServer() {
 	productRepo := repository.NewProductRepository(db.DB, esClient, customLogger.Logger())
 	outboxEventRepo := repository.NewOutboxEventRepository(db.DB, customLogger.Logger())
 	elasticRepo := repository.NewElasticRepository(esClient, customLogger.Logger())
+	cartRepo := repository.NewCartRepository(redisClient, customLogger.Logger())
 
 	cacheCategory := cache.NewCategoryCache(redisClient, categoryRepo, customLogger.Logger())
 	cacheProduct := cache.NewProductCache(redisClient, productRepo, customLogger.Logger())
@@ -75,10 +76,12 @@ func RunServer() {
 	jwtService := service.NewJwtService(cfg)
 	categoryService := service.NewCategoryService(categoryRepo, redisClient, cacheCategory, txManager, customLogger.Logger())
 	productService := service.NewProductService(cfg, productRepo, redisClient, cacheProduct, txManager, categoryService, outboxEventRepo, elasticRepo, customLogger.Logger())
+	cartService := service.NewCartService(cartRepo, productService, customLogger.Logger())
 
 	handler.NewCategoryHandler(e, categoryService, cfg, jwtService, redisClient)
 	handler.NewProductHandler(e, cfg, productService, jwtService, redisClient)
 	handler.NewUploadImageStorageHandler(e, cfg, jwtService, storageHandler, redisClient)
+	handler.NewCartHandler(e, cartService, cfg, jwtService, redisClient)
 
 	e.GET("/api/check", func(c echo.Context) error {
 		return c.String(200, "OK")
