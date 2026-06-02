@@ -21,6 +21,7 @@ type ProductRepositoryInterface interface {
 	CreateProduct(ctx context.Context, req entity.ProductEntity) (int64, error)
 	UpdateProduct(ctx context.Context, req entity.ProductEntity) error
 	DeleteProduct(ctx context.Context, productId int64) error
+	UpdateStockProduct(ctx context.Context, products []entity.ProductUpdateStockEntity) error
 
 	getDB(ctx context.Context) *gorm.DB
 }
@@ -44,6 +45,33 @@ func (p *productRepository) getDB(ctx context.Context) *gorm.DB {
 	return p.db
 }
 
+// UpdateStockProduct implements [ProductRepositoryInterface].
+func (p *productRepository) UpdateStockProduct(ctx context.Context, products []entity.ProductUpdateStockEntity) error {
+	var (
+		db = p.getDB(ctx)
+	)
+
+	for _, product := range products {
+		tx := db.WithContext(ctx).
+			Model(&model.Product{}).
+			Where("id = ? AND stock >= ?", product.ProductID, product.Quantity).
+			Update("stock", gorm.Expr("stock - ?", product.Quantity))
+
+		if tx.Error != nil {
+			p.logger.Errorf("[ProductRepository-1] UpdateProduct: %v", tx.Error)
+			return tx.Error
+		}
+
+		if tx.RowsAffected == 0 {
+			err := errors.New(utils.STOCK_UNAVAILABLE)
+			p.logger.Errorf("[ProductRepository-2] UpdateProduct: %v", err)
+			return err
+		}
+	}
+
+	return nil
+}
+
 // GetBatchProducts implements [ProductRepositoryInterface].
 func (p *productRepository) GetBatchProducts(ctx context.Context, productIds []int64) ([]entity.ProductEntity, error) {
 	var (
@@ -58,7 +86,7 @@ func (p *productRepository) GetBatchProducts(ctx context.Context, productIds []i
 
 		batchProducts := []model.Product{}
 		if err := db.WithContext(ctx).
-			Select("id", "image", "name", "sale_price", "weight", "unit", "status").
+			Select("id", "image", "name", "sale_price", "weight", "unit", "regular_price").
 			Where("id IN ?", productIds[i:end]).
 			Find(&batchProducts).Error; err != nil {
 			p.logger.Errorf("[ProductRepository-1] GetBatchProducts: %v", err)
@@ -77,13 +105,13 @@ func (p *productRepository) GetBatchProducts(ctx context.Context, productIds []i
 	entities := []entity.ProductEntity{}
 	for _, val := range modelProducts {
 		entities = append(entities, entity.ProductEntity{
-			ID:        val.ID,
-			Name:      val.Name,
-			Image:     val.Image,
-			Status:    val.Status,
-			SalePrice: val.SalePrice,
-			Weight:    val.Weight,
-			Unit:      val.Unit,
+			ID:           val.ID,
+			Name:         val.Name,
+			RegularPrice: val.RegularPrice,
+			Image:        val.Image,
+			SalePrice:    val.SalePrice,
+			Weight:       val.Weight,
+			Unit:         val.Unit,
 		})
 	}
 

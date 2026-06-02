@@ -14,9 +14,9 @@ import (
 
 type NotificationServiceInterface interface {
 	GetAllNotifications(ctx context.Context, query entity.NotificationQueryString) ([]entity.NotificationEntity, int64, int64, error)
-	GetNotificationById(ctx context.Context, notificationId uint) (*entity.NotificationEntity, error)
+	GetNotificationById(ctx context.Context, notificationId int64) (*entity.NotificationEntity, error)
 	SendPushNotification(ctx context.Context, notification entity.NotificationEntity)
-	MarkAsReadNotification(ctx context.Context, notificationId uint) error
+	MarkAsReadNotification(ctx context.Context, notificationId int64) error
 }
 
 type notificationService struct {
@@ -38,7 +38,7 @@ func NewNotificationService(repo repository.NotificationRepositoryInterface, txM
 // TODO add cache notification
 
 // MarkAsReadNotification implements [NotificationServiceInterface].
-func (n *notificationService) MarkAsReadNotification(ctx context.Context, notificationId uint) error {
+func (n *notificationService) MarkAsReadNotification(ctx context.Context, notificationId int64) error {
 	if err := n.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
 		if _, err := n.repo.GetNotificationById(txCtx, notificationId); err != nil {
 			return err
@@ -97,7 +97,7 @@ func (n *notificationService) SendPushNotification(ctx context.Context, notifica
 }
 
 // GetNotificationById implements [NotificationServiceInterface].
-func (n *notificationService) GetNotificationById(ctx context.Context, notificationId uint) (*entity.NotificationEntity, error) {
+func (n *notificationService) GetNotificationById(ctx context.Context, notificationId int64) (*entity.NotificationEntity, error) {
 	notification := &entity.NotificationEntity{}
 
 	if err := n.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {

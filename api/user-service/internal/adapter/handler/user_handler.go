@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -454,7 +453,6 @@ func (u *userHandler) UpdateProfile(c echo.Context) error {
 
 	latString := conv.LatLngToString(req.Lat)
 	lngString := conv.LatLngToString(req.Lng)
-	phoneString := fmt.Sprintf("%d", req.Phone)
 
 	reqEntity := entity.UserEntity{
 		ID:      userId,
@@ -463,7 +461,7 @@ func (u *userHandler) UpdateProfile(c echo.Context) error {
 		Address: req.Address,
 		Lat:     latString,
 		Lng:     lngString,
-		Phone:   phoneString,
+		Phone:   req.Phone,
 		Photo:   req.Photo,
 		RoleID:  2,
 	}

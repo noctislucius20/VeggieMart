@@ -133,7 +133,7 @@ func (r *roleRepository) GetRoleByIdOrName(ctx context.Context, id int64, name s
 		modelRole model.Role
 	)
 
-	if err := db.Debug().WithContext(ctx).Select("id", "name").Preload("Permissions", func(db *gorm.DB) *gorm.DB {
+	if err := db.WithContext(ctx).Select("id", "name").Preload("Permissions", func(db *gorm.DB) *gorm.DB {
 		return db.Select("id", "resource", "action", "scope")
 	}).
 		First(&modelRole, "id = ? OR name = ?", id, name).Error; err != nil {

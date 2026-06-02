@@ -1,7 +1,7 @@
 package entity
 
 type PaymentLogEntity struct {
-	ID        uint
-	PaymentID uint
+	ID        int64
+	PaymentID int64
 	Status    string
 }

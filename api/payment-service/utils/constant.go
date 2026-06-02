@@ -9,6 +9,7 @@ const (
 
 const (
 	//client error
+	ID_REQUIRED               = "400: ID_REQUIRED"
 	SESSION_EXPIRED           = "401: SESSION_EXPIRED"
 	TOKEN_INVALID             = "401: TOKEN_INVALID"
 	TOKEN_EXPIRED             = "401: TOKEN_EXPIRED"

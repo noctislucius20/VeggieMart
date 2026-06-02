@@ -1,14 +1,14 @@
 package response
 
 type NotificationResponseList struct {
-	ID      uint   `json:"id"`
+	ID      int64  `json:"id"`
 	Subject string `json:"subject"`
 	Status  string `json:"status"`
 	SentAt  string `json:"sent_at"`
 }
 
 type NotificationDetailResponse struct {
-	ID               uint   `json:"id"`
+	ID               int64  `json:"id"`
 	Subject          string `json:"subject"`
 	Message          string `json:"message"`
 	Status           string `json:"status"`

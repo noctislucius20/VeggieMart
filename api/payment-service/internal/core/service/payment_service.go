@@ -11,7 +11,6 @@ import (
 	"payment-service/internal/core/service/transaction"
 	"payment-service/utils"
 	"strings"
-	"sync"
 
 	"github.com/labstack/gommon/log"
 )
@@ -20,10 +19,9 @@ type PaymentServiceInterface interface {
 	ProcessPayment(ctx context.Context, payment entity.PaymentEntity, jwtUserData entity.JwtUserData) (*entity.PaymentEntity, error)
 	UpdateStatusByOrderCode(ctx context.Context, orderCode string, status string) error
 	GetAllPayments(ctx context.Context, query entity.QueryStringPayment, userData string) ([]entity.PaymentEntity, int64, int64, error)
-	GetPaymentById(ctx context.Context, paymentId uint, jwtUserData entity.JwtUserData, userData string) (*entity.PaymentEntity, error)
+	GetPaymentById(ctx context.Context, paymentId int64, jwtUserData entity.JwtUserData, userData string) (*entity.PaymentEntity, error)
 
-	getAllOrders(ctx context.Context, payments []entity.PaymentEntity, userData string) error
-	getByIdOrder(ctx context.Context, payment *entity.PaymentEntity, jwtUserData entity.JwtUserData, roleName string) error
+	getOrderHttp(ctx context.Context, payment *entity.PaymentEntity, jwtUserData entity.JwtUserData, roleName string) error
 }
 
 type paymentService struct {
@@ -51,7 +49,7 @@ func NewPaymentService(repo repository.PaymentRepositoryInterface, repoOutbox re
 }
 
 // GetPaymentById implements [PaymentServiceInterface].
-func (p *paymentService) GetPaymentById(ctx context.Context, paymentId uint, jwtUserData entity.JwtUserData, userData string) (*entity.PaymentEntity, error) {
+func (p *paymentService) GetPaymentById(ctx context.Context, paymentId int64, jwtUserData entity.JwtUserData, userData string) (*entity.PaymentEntity, error) {
 	payment := &entity.PaymentEntity{}
 
 	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
@@ -62,12 +60,8 @@ func (p *paymentService) GetPaymentById(ctx context.Context, paymentId uint, jwt
 
 		switch strings.ToLower(roleEntity.Name) {
 		case "customer": // requested by customer
-			paymentEntity, err := p.cachePayment.GetPaymentById(txCtx, paymentId, uint(jwtUserData.UserID))
+			paymentEntity, err := p.cachePayment.GetPaymentById(txCtx, paymentId, int64(jwtUserData.UserID))
 			if err != nil {
-				return err
-			}
-
-			if err := p.getByIdOrder(txCtx, paymentEntity, jwtUserData, roleEntity.Name); err != nil {
 				return err
 			}
 
@@ -75,10 +69,6 @@ func (p *paymentService) GetPaymentById(ctx context.Context, paymentId uint, jwt
 		default: // requested by admin
 			paymentEntity, err := p.cachePayment.GetPaymentById(txCtx, paymentId, 0)
 			if err != nil {
-				return err
-			}
-
-			if err := p.getByIdOrder(txCtx, paymentEntity, jwtUserData, roleEntity.Name); err != nil {
 				return err
 			}
 
@@ -112,10 +102,6 @@ func (p *paymentService) GetAllPayments(ctx context.Context, query entity.QueryS
 			return nil
 		}
 
-		if err := p.getAllOrders(txCtx, paymentEntities, userData); err != nil {
-			return err
-		}
-
 		payments, countData, totalPages = paymentEntities, count, pages
 
 		return nil
@@ -130,7 +116,7 @@ func (p *paymentService) GetAllPayments(ctx context.Context, query entity.QueryS
 // UpdateStatusByOrderCode implements [PaymentServiceInterface].
 func (p *paymentService) UpdateStatusByOrderCode(ctx context.Context, orderCode string, status string) error {
 	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		orderId, err := p.httpService.HttpOrderIdByOrderCodePublicService(orderCode)
+		orderId, err := p.repo.GetOrderIdByOrderCode(txCtx, orderCode)
 		if err != nil {
 			return err
 		}
@@ -158,6 +144,15 @@ func (p *paymentService) ProcessPayment(ctx context.Context, payment entity.Paym
 	publishPaymentSuccess := p.cfg.PublisherName.PaymentSuccess
 
 	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		roleEntity, err := p.cachePayment.GetRoleById(txCtx, jwtUserData.RoleID)
+		if err != nil {
+			return err
+		}
+
+		if err := p.getOrderHttp(txCtx, &payment, jwtUserData, roleEntity.Name); err != nil {
+			return err
+		}
+
 		switch strings.ToLower(payment.PaymentMethod) {
 		case "cod":
 			payment.PaymentStatus = "SUCCESS"
@@ -181,7 +176,7 @@ func (p *paymentService) ProcessPayment(ctx context.Context, payment entity.Paym
 			// }
 
 			payloadPublish := map[string]any{
-				"order_id":       payment.OrderID,
+				"order_id":       payment.Order.ID,
 				"payment_method": payment.PaymentMethod,
 			}
 
@@ -191,15 +186,6 @@ func (p *paymentService) ProcessPayment(ctx context.Context, payment entity.Paym
 
 			payment.ID = paymentId
 		case "midtrans":
-			roleEntity, err := p.cachePayment.GetRoleById(txCtx, jwtUserData.RoleID)
-			if err != nil {
-				return err
-			}
-
-			if err := p.getByIdOrder(txCtx, &payment, jwtUserData, roleEntity.Name); err != nil {
-				return err
-			}
-
 			transactionId, err := p.midtrans.CreateTransaction(payment.Order.OrderCode, int64(payment.GrossAmount), payment.Customer.CustomerName, payment.Customer.CustomerEmail)
 			if err != nil {
 				return err
@@ -227,7 +213,7 @@ func (p *paymentService) ProcessPayment(ctx context.Context, payment entity.Paym
 			// }
 
 			payloadPublish := map[string]any{
-				"order_id":       payment.OrderID,
+				"order_id":       payment.Order.ID,
 				"payment_method": payment.PaymentMethod,
 			}
 
@@ -249,84 +235,27 @@ func (p *paymentService) ProcessPayment(ctx context.Context, payment entity.Paym
 	return &payment, nil
 }
 
-// getByIdOrder implements [PaymentServiceInterface].
-func (p *paymentService) getByIdOrder(ctx context.Context, payment *entity.PaymentEntity, jwtUserData entity.JwtUserData, roleName string) error {
-	var (
-		wg          sync.WaitGroup
-		resultOrder *entity.OrderDetailResponseEntity
-		errCh       = make(chan error, 1)
-		err         error
-	)
-
-	wg.Go(func() {
-		resultOrder, err = p.httpService.HttpOrderByIdService(int64(payment.OrderID), jwtUserData, roleName)
-		if err != nil {
-			errCh <- err
-		}
-	})
-
-	wg.Wait()
-
-	close(errCh)
-	for err := range errCh {
-		if err != nil {
-			return err
-		}
+// getOrderHttp implements [PaymentServiceInterface].
+func (p *paymentService) getOrderHttp(ctx context.Context, payment *entity.PaymentEntity, jwtUserData entity.JwtUserData, roleName string) error {
+	resultOrder, err := p.httpService.HttpOrderByIdService(int64(payment.Order.ID), jwtUserData, roleName)
+	if err != nil {
+		return err
 	}
 
+	payment.Customer.CustomerID = resultOrder.Customer.CustomerID
 	payment.Customer.CustomerName = resultOrder.Customer.CustomerName
+	payment.Customer.CustomerPhone = resultOrder.Customer.CustomerPhone
 	payment.Customer.CustomerEmail = resultOrder.Customer.CustomerEmail
 	payment.Customer.CustomerAddress = resultOrder.Customer.CustomerAddress
 
+	payment.Order.ID = resultOrder.ID
 	payment.Order.OrderCode = resultOrder.OrderCode
-	payment.Order.OrderShippingType = resultOrder.ShippingType
-	payment.Order.OrderAt = resultOrder.OrderDatetime
-	payment.Order.OrderRemarks = resultOrder.Remarks
-
-	return nil
-}
-
-// getAllOrders implements [PaymentServiceInterface].
-func (p *paymentService) getAllOrders(ctx context.Context, payments []entity.PaymentEntity, userData string) error {
-	orderIds := map[uint]struct{}{}
-	for _, payment := range payments {
-		orderIds[payment.OrderID] = struct{}{}
-	}
-
-	reqOrderIds := make([]int64, 0, len(orderIds))
-	for id := range orderIds {
-		reqOrderIds = append(reqOrderIds, int64(id))
-	}
-
-	var (
-		wg           sync.WaitGroup
-		resultOrders map[int64]entity.OrderDetailResponseEntity
-		errCh        = make(chan error, 1)
-		err          error
-	)
-
-	wg.Go(func() {
-		resultOrders, err = p.httpService.HttpOrdersAllService(reqOrderIds, userData)
-		if err != nil {
-			errCh <- err
-		}
-	})
-
-	wg.Wait()
-
-	close(errCh)
-	for err := range errCh {
-		if err != nil {
-			return err
-		}
-	}
-
-	for pIdx, payment := range payments {
-		if q, ok := resultOrders[int64(payment.OrderID)]; ok {
-			payments[pIdx].Order.OrderCode = q.OrderCode
-			payments[pIdx].Order.OrderShippingType = q.ShippingType
-		}
-	}
+	payment.Order.OrderDatetime = resultOrder.OrderDatetime
+	payment.Order.Remarks = resultOrder.Remarks
+	payment.Order.ShippingFee = resultOrder.ShippingFee
+	payment.Order.ShippingType = resultOrder.ShippingType
+	payment.Order.Status = resultOrder.Status
+	payment.Order.TotalAmount = resultOrder.TotalAmount
 
 	return nil
 }

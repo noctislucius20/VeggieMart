@@ -7,7 +7,7 @@ import (
 )
 
 type Notification struct {
-	ID               uint            `gorm:"primaryKey"`
+	ID               int64           `gorm:"primaryKey"`
 	NotificationType string          `gorm:"type:varchar(50);not null"`
 	ReceiverID       *int64          `gorm:"type:bigint"`
 	ReceiverEmail    *string         `gorm:"type:varchar(80)"`

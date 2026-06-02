@@ -25,7 +25,7 @@ type UpdatePasswordRequest struct {
 type UpdateDataRequest struct {
 	Name    string  `json:"name" validate:"required,min=3"`
 	Email   string  `json:"email" validate:"required,email"`
-	Phone   int64   `json:"phone"`
+	Phone   string  `json:"phone" validate:"number"`
 	Address string  `json:"address"`
 	Lat     float64 `json:"lat"`
 	Lng     float64 `json:"lng"`

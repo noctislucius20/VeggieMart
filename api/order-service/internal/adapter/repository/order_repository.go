@@ -16,7 +16,6 @@ import (
 
 type OrderRepositoryInterface interface {
 	GetAllOrders(ctx context.Context, query entity.OrderQueryString) ([]entity.OrderEntity, int64, int64, error)
-	GetBatchOrders(ctx context.Context, orderIds []int64, userId int64) ([]entity.OrderEntity, error)
 	GetOrderById(ctx context.Context, orderId int64, userId int64) (*entity.OrderEntity, error)
 	CreateOrder(ctx context.Context, req entity.OrderEntity) (int64, error)
 	UpdateOrderStatus(ctx context.Context, req entity.OrderEntity) error
@@ -44,75 +43,13 @@ func (o *orderRepository) getDB(ctx context.Context) *gorm.DB {
 	return o.db
 }
 
-// GetBatchOrders implements [OrderRepositoryInterface].
-func (o *orderRepository) GetBatchOrders(ctx context.Context, orderIds []int64, userId int64) ([]entity.OrderEntity, error) {
-	var (
-		db          = o.getDB(ctx)
-		modelOrders []model.Order
-		entities    []entity.OrderEntity
-	)
-
-	chunkSize := 150
-
-	for i := 0; i < len(orderIds); i += chunkSize {
-		end := min(i+chunkSize, len(orderIds))
-
-		batchOrders := []model.Order{}
-
-		sqlMain := db.WithContext(ctx).
-			Preload("OrderItems", func(db *gorm.DB) *gorm.DB {
-				return db.Select("id", "order_id", "product_id", "quantity")
-			}).
-			Select("id", "buyer_id", "order_code", "shipping_type").
-			Where("id IN ?", orderIds[i:end])
-
-		if userId != 0 {
-			sqlMain = sqlMain.Where("buyer_id = ?", userId)
-		}
-
-		if err := sqlMain.
-			Find(&batchOrders).Error; err != nil {
-			o.logger.Errorf("[OrderRepository-1] GetBatchOrders: %v", err)
-			return nil, err
-		}
-
-		modelOrders = append(modelOrders, batchOrders...)
-	}
-
-	if len(modelOrders) == 0 {
-		err := errors.New(utils.DATA_NOT_FOUND)
-		o.logger.Errorf("[OrderRepository-2] GetBatchOrders: %v", err)
-		return nil, err
-	}
-
-	for _, val := range modelOrders {
-		orderEntity := entity.OrderEntity{
-			ID:           val.ID,
-			OrderCode:    val.OrderCode,
-			ShippingType: val.ShippingType,
-			BuyerID:      val.BuyerID,
-		}
-
-		for _, item := range val.OrderItems {
-			orderEntity.OrderItems = append(orderEntity.OrderItems, entity.OrderItemEntity{
-				ID:        item.ID,
-				ProductID: item.ProductID,
-				Quantity:  item.Quantity,
-			})
-		}
-
-		entities = append(entities, orderEntity)
-	}
-
-	return entities, nil
-}
-
 // GetOrderByOrderCode implements [OrderRepositoryInterface].
 func (o *orderRepository) GetOrderByOrderCode(ctx context.Context, orderCode string, userId int64) (*entity.OrderEntity, error) {
 	var (
 		db          = o.getDB(ctx)
 		modelOrder  model.Order
 		orderEntity *entity.OrderEntity
+		snapshotMap = make(map[int64]entity.ProductSnapshotEntity)
 	)
 
 	sqlMain := db.WithContext(ctx).
@@ -120,6 +57,9 @@ func (o *orderRepository) GetOrderByOrderCode(ctx context.Context, orderCode str
 		Omit("created_at", "updated_at", "deleted_at").
 		Preload("OrderItems", func(db *gorm.DB) *gorm.DB {
 			return db.Select("id", "order_id", "product_id", "quantity")
+		}).
+		Preload("ProductSnapshots", func(db *gorm.DB) *gorm.DB {
+			return db.Omit("created_at", "last_used", "regular_price")
 		})
 
 	if userId != 0 {
@@ -146,15 +86,38 @@ func (o *orderRepository) GetOrderByOrderCode(ctx context.Context, orderCode str
 		Remarks:      modelOrder.Remarks,
 		ShippingType: modelOrder.ShippingType,
 		ShippingFee:  int64(modelOrder.ShippingFee),
+		BuyerName:    modelOrder.BuyerName,
+		BuyerEmail:   modelOrder.BuyerEmail,
+		BuyerPhone:   modelOrder.BuyerPhone,
+		BuyerAddress: modelOrder.BuyerAddress,
+		BuyerLat:     modelOrder.BuyerLat,
+		BuyerLng:     modelOrder.BuyerLng,
+	}
+
+	for _, snapshot := range modelOrder.ProductSnapshots {
+		snapshotMap[snapshot.ProductID] = entity.ProductSnapshotEntity{
+			ProductID: snapshot.ProductID,
+			Name:      snapshot.Name,
+			Image:     snapshot.Image,
+			SalePrice: snapshot.SalePrice,
+			Weight:    snapshot.Weight,
+			Unit:      snapshot.Unit,
+		}
 	}
 
 	for _, item := range modelOrder.OrderItems {
-		orderEntity.OrderItems = append(orderEntity.OrderItems, entity.OrderItemEntity{
-			ID:        item.ID,
-			OrderID:   item.OrderID,
-			ProductID: item.ProductID,
-			Quantity:  item.Quantity,
-		})
+		if snapshot, ok := snapshotMap[item.ProductID]; ok {
+			orderEntity.OrderItems = append(orderEntity.OrderItems, entity.OrderItemEntity{
+				ID:        item.ID,
+				OrderID:   item.OrderID,
+				ProductID: item.ProductID,
+				Quantity:  item.Quantity,
+
+				ProductName:  snapshot.Name,
+				ProductImage: snapshot.Image,
+				Price:        int64(snapshot.SalePrice),
+			})
+		}
 	}
 
 	return orderEntity, nil
@@ -180,6 +143,12 @@ func (o *orderRepository) CreateOrder(ctx context.Context, req entity.OrderEntit
 			ShippingType: req.ShippingType,
 			ShippingFee:  float64(req.ShippingFee),
 			Remarks:      req.Remarks,
+			BuyerName:    req.BuyerName,
+			BuyerEmail:   req.BuyerEmail,
+			BuyerPhone:   req.BuyerPhone,
+			BuyerAddress: req.BuyerAddress,
+			BuyerLat:     req.BuyerLat,
+			BuyerLng:     req.BuyerLng,
 		}
 	)
 
@@ -187,6 +156,18 @@ func (o *orderRepository) CreateOrder(ctx context.Context, req entity.OrderEntit
 		modelOrder.OrderItems = append(modelOrder.OrderItems, model.OrderItem{
 			ProductID: item.ProductID,
 			Quantity:  item.Quantity,
+		})
+	}
+
+	for _, snapshot := range req.ProductSnapshots {
+		modelOrder.ProductSnapshots = append(modelOrder.ProductSnapshots, model.ProductSnapshot{
+			ProductID:    snapshot.ProductID,
+			Name:         snapshot.Name,
+			Image:        snapshot.Image,
+			RegularPrice: snapshot.RegularPrice,
+			SalePrice:    snapshot.SalePrice,
+			Unit:         snapshot.Unit,
+			Weight:       snapshot.Weight,
 		})
 	}
 
@@ -221,6 +202,9 @@ func (o *orderRepository) GetAllOrders(ctx context.Context, query entity.OrderQu
 		Preload("OrderItems", func(db *gorm.DB) *gorm.DB {
 			return db.Select("id", "order_id", "product_id", "quantity")
 		}).
+		Preload("ProductSnapshots", func(db *gorm.DB) *gorm.DB {
+			return db.Omit("created_at", "last_used", "regular_price")
+		}).
 		Where("order_code ILIKE ? OR status ILIKE ?", "%"+query.Search+"%", "%"+query.Status+"%")
 
 	if query.BuyerID != 0 {
@@ -242,22 +226,48 @@ func (o *orderRepository) GetAllOrders(ctx context.Context, query entity.OrderQu
 	}
 
 	for _, val := range modelOrders {
+		snapshotMap := make(map[int64]entity.ProductSnapshotEntity)
+
 		orderEntity := entity.OrderEntity{
-			ID:          val.ID,
-			OrderCode:   val.OrderCode,
-			Status:      val.Status,
-			OrderDate:   val.OrderDate.Format("2006-01-02"),
-			OrderTime:   val.OrderTime.Format("15:04:05"),
-			TotalAmount: int64(val.TotalAmount),
-			BuyerID:     val.BuyerID,
+			ID:           val.ID,
+			OrderCode:    val.OrderCode,
+			Status:       val.Status,
+			OrderDate:    val.OrderDate.Format("2006-01-02"),
+			OrderTime:    val.OrderTime.Format("15:04:05"),
+			TotalAmount:  int64(val.TotalAmount),
+			BuyerID:      val.BuyerID,
+			BuyerName:    val.BuyerName,
+			BuyerEmail:   val.BuyerEmail,
+			BuyerPhone:   val.BuyerPhone,
+			BuyerAddress: val.BuyerAddress,
+			BuyerLat:     val.BuyerLat,
+			BuyerLng:     val.BuyerLng,
+		}
+
+		for _, snapshot := range val.ProductSnapshots {
+			snapshotMap[snapshot.ProductID] = entity.ProductSnapshotEntity{
+				ProductID: snapshot.ProductID,
+				Name:      snapshot.Name,
+				Image:     snapshot.Image,
+				SalePrice: snapshot.SalePrice,
+				Weight:    snapshot.Weight,
+				Unit:      snapshot.Unit,
+			}
 		}
 
 		for _, item := range val.OrderItems {
-			orderEntity.OrderItems = append(orderEntity.OrderItems, entity.OrderItemEntity{
-				ID:        item.ID,
-				ProductID: item.ProductID,
-				Quantity:  item.Quantity,
-			})
+			if snapshot, ok := snapshotMap[item.ProductID]; ok {
+				orderEntity.OrderItems = append(orderEntity.OrderItems, entity.OrderItemEntity{
+					ID:        item.ID,
+					OrderID:   item.OrderID,
+					ProductID: item.ProductID,
+					Quantity:  item.Quantity,
+
+					ProductName:  snapshot.Name,
+					ProductImage: snapshot.Image,
+					Price:        int64(snapshot.SalePrice),
+				})
+			}
 		}
 
 		entities = append(entities, orderEntity)
@@ -272,6 +282,7 @@ func (o *orderRepository) GetOrderById(ctx context.Context, orderId int64, userI
 		db          = o.getDB(ctx)
 		modelOrder  model.Order
 		orderEntity *entity.OrderEntity
+		snapshotMap = make(map[int64]entity.ProductSnapshotEntity)
 	)
 
 	sqlMain := db.WithContext(ctx).
@@ -279,6 +290,9 @@ func (o *orderRepository) GetOrderById(ctx context.Context, orderId int64, userI
 		Omit("created_at", "updated_at", "deleted_at").
 		Preload("OrderItems", func(db *gorm.DB) *gorm.DB {
 			return db.Select("id", "order_id", "product_id", "quantity")
+		}).
+		Preload("ProductSnapshots", func(db *gorm.DB) *gorm.DB {
+			return db.Omit("created_at", "last_used", "regular_price")
 		})
 
 	if userId != 0 {
@@ -304,15 +318,38 @@ func (o *orderRepository) GetOrderById(ctx context.Context, orderId int64, userI
 		Remarks:      modelOrder.Remarks,
 		ShippingType: modelOrder.ShippingType,
 		ShippingFee:  int64(modelOrder.ShippingFee),
+		BuyerName:    modelOrder.BuyerName,
+		BuyerEmail:   modelOrder.BuyerEmail,
+		BuyerPhone:   modelOrder.BuyerPhone,
+		BuyerAddress: modelOrder.BuyerAddress,
+		BuyerLat:     modelOrder.BuyerLat,
+		BuyerLng:     modelOrder.BuyerLng,
+	}
+
+	for _, snapshot := range modelOrder.ProductSnapshots {
+		snapshotMap[snapshot.ProductID] = entity.ProductSnapshotEntity{
+			ProductID: snapshot.ProductID,
+			Name:      snapshot.Name,
+			Image:     snapshot.Image,
+			SalePrice: snapshot.SalePrice,
+			Weight:    snapshot.Weight,
+			Unit:      snapshot.Unit,
+		}
 	}
 
 	for _, item := range modelOrder.OrderItems {
-		orderEntity.OrderItems = append(orderEntity.OrderItems, entity.OrderItemEntity{
-			ID:        item.ID,
-			OrderID:   item.OrderID,
-			ProductID: item.ProductID,
-			Quantity:  item.Quantity,
-		})
+		if snapshot, ok := snapshotMap[item.ProductID]; ok {
+			orderEntity.OrderItems = append(orderEntity.OrderItems, entity.OrderItemEntity{
+				ID:        item.ID,
+				OrderID:   item.OrderID,
+				ProductID: item.ProductID,
+				Quantity:  item.Quantity,
+
+				ProductName:  snapshot.Name,
+				ProductImage: snapshot.Image,
+				Price:        int64(snapshot.SalePrice),
+			})
+		}
 	}
 
 	return orderEntity, nil

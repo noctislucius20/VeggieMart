@@ -22,6 +22,11 @@ type ProductEntity struct {
 	Childs       []ProductEntity `json:"childs"`
 }
 
+type ProductUpdateStockEntity struct {
+	ProductID int64 `json:"id"`
+	Quantity  int64 `json:"quantity"`
+}
+
 type QueryStringProduct struct {
 	Search     string
 	Page       int64

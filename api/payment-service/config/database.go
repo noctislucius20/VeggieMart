@@ -45,6 +45,7 @@ func (cfg Config) ConnectionPostgres(ctx context.Context) (*Postgres, error) {
 		db.AutoMigrate(
 			&model.Payment{},
 			&model.PaymentLog{},
+			&model.OrderSnapshot{},
 			&model.OutboxEvent{},
 		)
 

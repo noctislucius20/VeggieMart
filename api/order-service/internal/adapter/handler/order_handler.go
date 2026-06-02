@@ -25,14 +25,11 @@ type OrderHandlerInterface interface {
 	GetOrderById(c echo.Context) error
 	GetAllOrders(c echo.Context) error
 	CreateOrder(c echo.Context) error
-	GetBatchOrders(c echo.Context) error
 	GetOrderByOrderCode(c echo.Context) error
 
 	GetAllOrdersAdmin(c echo.Context) error
 	GetOrderByIdAdmin(c echo.Context) error
 	UpdateOrderStatusByAdmin(c echo.Context) error
-
-	GetOrderIdByOrderCodePublic(c echo.Context) error
 }
 
 type orderHandler struct {
@@ -51,8 +48,6 @@ func NewOrderHandler(e *echo.Echo, cfg *config.Config, orderService service.Orde
 
 	mid := adapter.NewMiddlewareAdapter(cfg, logger.NewLogger().Logger(), jwtService, redisClient)
 
-	e.GET("/public/orders/:orderCode/code", orderHandler.GetOrderIdByOrderCodePublic)
-
 	authPermission := []string{
 		"orders:read:own",
 		"orders:write:own",
@@ -70,7 +65,6 @@ func NewOrderHandler(e *echo.Echo, cfg *config.Config, orderService service.Orde
 	// authGroup := e.Group("/auth", mid.CheckToken())
 	e.POST("/orders", orderHandler.CreateOrder, mid.CheckToken(), mid.RequiredPermission(authPermission...), mid.DistanceCheck())
 	e.GET("/orders", orderHandler.GetAllOrders, mid.CheckToken(), mid.RequiredPermission(authPermission...))
-	e.POST("/orders/batch", orderHandler.GetBatchOrders, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 	e.GET("/orders/:id", orderHandler.GetOrderById, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 	e.GET("/orders/:orderCode/code", orderHandler.GetOrderByOrderCode, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 
@@ -80,94 +74,6 @@ func NewOrderHandler(e *echo.Echo, cfg *config.Config, orderService service.Orde
 	e.PUT("/orders/:id/status", orderHandler.UpdateOrderStatusByAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
 
 	return orderHandler
-}
-
-// GetOrderIdByOrderCodePublic implements [OrderHandlerInterface].
-func (o *orderHandler) GetOrderIdByOrderCodePublic(c echo.Context) error {
-	var (
-		ctx = c.Request().Context()
-	)
-
-	orderCodeParam := c.Param("orderCode")
-	if orderCodeParam == "" {
-		c.Logger().Errorf("[OrderHandler-1] GetOrderIdByOrderCodePublic: %v", "order code required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ORDER_CODE_INVALID))
-	}
-
-	result, err := o.orderService.GetOrderIdByOrderCodePublic(ctx, orderCodeParam)
-	if err != nil {
-		c.Logger().Errorf("[OrderHandler-2] GetOrderIdByOrderCodePublic: %v", err)
-		switch err.Error() {
-		case utils.DATA_NOT_FOUND:
-			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
-		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
-		}
-	}
-
-	respOrder := map[string]int64{
-		"order_id": result,
-	}
-
-	return c.JSON(http.StatusOK, response.ResponseSuccess(respOrder))
-}
-
-// GetBatchOrders implements [OrderHandlerInterface].
-func (o *orderHandler) GetBatchOrders(c echo.Context) error {
-	var (
-		ctx         = c.Request().Context()
-		respBatch   = []response.OrderBatchResponse{}
-		req         = request.OrderBatchRequest{}
-		jwtUserData = entity.JwtUserData{}
-	)
-
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[OrderHandler-1] GetBatchOrders: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
-	}
-
-	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
-		c.Logger().Errorf("[OrderHandler-2] GetBatchOrders: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
-	}
-
-	if err := c.Bind(&req); err != nil {
-		c.Logger().Errorf("[OrderHandler-3] GetBatchOrders: %v", err)
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
-	}
-
-	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[OrderHandler-4] GetBatchOrders: %v", err)
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
-	}
-
-	results, err := o.orderService.GetBatchOrders(ctx, req.IDOrders, jwtUserData, user)
-	if err != nil {
-		c.Logger().Errorf("[OrderHandler-5] GetBatchOrders: %v", err)
-		switch err.Error() {
-		case utils.DATA_NOT_FOUND:
-			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
-		case utils.RELATION_DATA_NOT_FOUND:
-			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
-		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
-		}
-	}
-
-	for _, result := range results {
-		respBatch = append(respBatch, response.OrderBatchResponse{
-			ID:           result.ID,
-			OrderCode:    result.OrderCode,
-			ShippingType: result.ShippingType,
-			Customer: response.OrderCustomer{
-				CustomerName:  result.BuyerName,
-				CustomerEmail: result.BuyerEmail,
-			},
-		})
-	}
-
-	return c.JSON(http.StatusOK, response.ResponseSuccess(respBatch))
 }
 
 // GetOrderById implements [OrderHandlerInterface].
@@ -189,12 +95,10 @@ func (o *orderHandler) GetOrderById(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 	}
 
-	userId := jwtUserData.UserID
-
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[OrderHandler-3] GetOrderById: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
@@ -203,14 +107,12 @@ func (o *orderHandler) GetOrderById(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
 	}
 
-	result, err := o.orderService.GetOrderById(ctx, id, userId, user)
+	result, err := o.orderService.GetOrderById(ctx, id, jwtUserData)
 	if err != nil {
 		c.Logger().Errorf("[OrderHandler-5] GetOrderById: %v", err)
 		switch err.Error() {
 		case utils.DATA_NOT_FOUND:
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
-		case utils.RELATION_DATA_NOT_FOUND:
-			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		default:
 			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 		}
@@ -226,7 +128,7 @@ func (o *orderHandler) GetOrderById(c echo.Context) error {
 		ShippingType:  result.ShippingType,
 		Remarks:       result.Remarks,
 		Customer: response.OrderCustomer{
-			CustomerID:      result.ID,
+			CustomerID:      result.BuyerID,
 			CustomerName:    result.BuyerName,
 			CustomerPhone:   result.BuyerPhone,
 			CustomerAddress: result.BuyerAddress,
@@ -268,17 +170,15 @@ func (o *orderHandler) GetOrderByOrderCode(c echo.Context) error {
 	orderCode := c.Param("orderCode")
 	if orderCode == "" {
 		c.Logger().Errorf("[OrderHandler-3] GetOrderByOrderCode: %v", "order code required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ORDER_CODE_INVALID))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ORDER_CODE_REQUIRED))
 	}
 
-	result, err := o.orderService.GetOrderByOrderCode(ctx, orderCode, jwtUserData, user)
+	result, err := o.orderService.GetOrderByOrderCode(ctx, orderCode, jwtUserData)
 	if err != nil {
 		c.Logger().Errorf("[OrderHandler-4] GetOrderByOrderCode: %v", err)
 		switch err.Error() {
 		case utils.DATA_NOT_FOUND:
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
-		case utils.RELATION_DATA_NOT_FOUND:
-			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		default:
 			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 		}
@@ -291,9 +191,10 @@ func (o *orderHandler) GetOrderByOrderCode(c echo.Context) error {
 		TotalAmount:   result.TotalAmount,
 		OrderDatetime: fmt.Sprintf("%s %s", result.OrderDate, result.OrderTime),
 		ShippingFee:   result.ShippingFee,
+		ShippingType:  result.ShippingType,
 		Remarks:       result.Remarks,
 		Customer: response.OrderCustomer{
-			CustomerID:      result.ID,
+			CustomerID:      result.BuyerID,
 			CustomerName:    result.BuyerName,
 			CustomerPhone:   result.BuyerPhone,
 			CustomerAddress: result.BuyerAddress,
@@ -361,12 +262,7 @@ func (o *orderHandler) GetAllOrders(c echo.Context) error {
 	results, countData, totalPages, err := o.orderService.GetAllOrders(ctx, reqEntity, user)
 	if err != nil {
 		c.Logger().Errorf("[OrderHandler-5] GetAllOrders: %v", err)
-		switch err.Error() {
-		case utils.RELATION_DATA_NOT_FOUND:
-			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
-		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
-		}
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 	}
 
 	for _, result := range results {
@@ -381,10 +277,7 @@ func (o *orderHandler) GetAllOrders(c echo.Context) error {
 			ProductName:   result.OrderItems[0].ProductName,
 			TotalAmount:   result.TotalAmount,
 			ProductImage:  result.OrderItems[0].ProductImage,
-			Weight:        result.OrderItems[0].ProductWeight,
-			Unit:          result.OrderItems[0].ProductUnit,
-			Quantity:      result.OrderItems[0].Quantity,
-			OrderDateTime: result.OrderDate,
+			OrderDatetime: fmt.Sprintf("%s %s", result.OrderDate, result.OrderTime),
 		})
 	}
 
@@ -414,7 +307,7 @@ func (o *orderHandler) UpdateOrderStatusByAdmin(c echo.Context) error {
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[OrderHandler-2] UpdateOrderStatusByAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
@@ -444,8 +337,6 @@ func (o *orderHandler) UpdateOrderStatusByAdmin(c echo.Context) error {
 		switch err.Error() {
 		case utils.DATA_NOT_FOUND:
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
-		case utils.RELATION_DATA_NOT_FOUND:
-			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		case utils.INVALID_STATUS_TRANSITION:
 			return c.JSON(http.StatusConflict, response.ResponseFailed(err.Error()))
 		default:
@@ -459,8 +350,9 @@ func (o *orderHandler) UpdateOrderStatusByAdmin(c echo.Context) error {
 // CreateOrder implements [OrderHandlerInterface].
 func (o *orderHandler) CreateOrder(c echo.Context) error {
 	var (
-		ctx = c.Request().Context()
-		req = request.CreateOrderRequest{}
+		ctx         = c.Request().Context()
+		req         = request.CreateOrderRequest{}
+		jwtUserData = entity.JwtUserData{}
 	)
 
 	user := c.Get("user").(string)
@@ -469,18 +361,23 @@ func (o *orderHandler) CreateOrder(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
-	if err := c.Bind(&req); err != nil {
+	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
 		c.Logger().Errorf("[OrderHandler-2] CreateOrder: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+	}
+
+	if err := c.Bind(&req); err != nil {
+		c.Logger().Errorf("[OrderHandler-3] CreateOrder: %v", err)
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[OrderHandler-3] CreateOrder: %v", err)
+		c.Logger().Errorf("[OrderHandler-4] CreateOrder: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	reqEntity := entity.OrderEntity{
-		BuyerID:      req.BuyerID,
+		BuyerID:      jwtUserData.UserID,
 		OrderDate:    req.OrderDate,
 		TotalAmount:  req.TotalAmount,
 		ShippingType: req.ShippingType,
@@ -499,10 +396,12 @@ func (o *orderHandler) CreateOrder(c echo.Context) error {
 
 	orderId, orderCode, err := o.orderService.CreateOrder(ctx, reqEntity, user)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-4] CreateOrder: %v", err)
+		c.Logger().Errorf("[OrderHandler-5] CreateOrder: %v", err)
 		switch err.Error() {
 		case utils.RELATION_DATA_NOT_FOUND:
 			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
+		case utils.STOCK_UNAVAILABLE:
+			return c.JSON(http.StatusConflict, response.ResponseFailed(err.Error()))
 		default:
 			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 		}
@@ -519,8 +418,9 @@ func (o *orderHandler) CreateOrder(c echo.Context) error {
 // GetOrderByIdAdmin implements [OrderHandlerInterface].
 func (o *orderHandler) GetOrderByIdAdmin(c echo.Context) error {
 	var (
-		ctx       = c.Request().Context()
-		respOrder = response.OrderDetailResponse{}
+		ctx         = c.Request().Context()
+		respOrder   = response.OrderDetailResponse{}
+		jwtUserData = entity.JwtUserData{}
 	)
 
 	user := c.Get("user").(string)
@@ -529,26 +429,29 @@ func (o *orderHandler) GetOrderByIdAdmin(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
 	}
 
+	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
+		c.Logger().Errorf("[OrderHandler-2] GetOrderByIdAdmin: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+	}
+
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[OrderHandler-2] GetOrderByIdAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
+		c.Logger().Errorf("[OrderHandler-3] GetOrderByIdAdmin: %v", "id required")
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-3] GetOrderByIdAdmin: %v", "id invalid")
+		c.Logger().Errorf("[OrderHandler-4] GetOrderByIdAdmin: %v", "id invalid")
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
 	}
 
-	result, err := o.orderService.GetOrderByIdAdmin(ctx, id, user)
+	result, err := o.orderService.GetOrderById(ctx, id, jwtUserData)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-4] GetOrderByIdAdmin: %v", err)
+		c.Logger().Errorf("[OrderHandler-5] GetOrderByIdAdmin: %v", err)
 		switch err.Error() {
 		case utils.DATA_NOT_FOUND:
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
-		case utils.RELATION_DATA_NOT_FOUND:
-			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		default:
 			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 		}
@@ -561,9 +464,10 @@ func (o *orderHandler) GetOrderByIdAdmin(c echo.Context) error {
 		TotalAmount:   result.TotalAmount,
 		OrderDatetime: fmt.Sprintf("%s %s", result.OrderDate, result.OrderTime),
 		ShippingFee:   result.ShippingFee,
+		ShippingType:  result.ShippingType,
 		Remarks:       result.Remarks,
 		Customer: response.OrderCustomer{
-			CustomerID:      result.ID,
+			CustomerID:      result.BuyerID,
 			CustomerName:    result.BuyerName,
 			CustomerPhone:   result.BuyerPhone,
 			CustomerAddress: result.BuyerAddress,
@@ -622,12 +526,7 @@ func (o *orderHandler) GetAllOrdersAdmin(c echo.Context) error {
 	results, countData, totalPages, err := o.orderService.GetAllOrdersAdmin(ctx, reqEntity, user)
 	if err != nil {
 		c.Logger().Errorf("[OrderHandler-4] GetAllOrdersAdmin: %v", err)
-		switch err.Error() {
-		case utils.RELATION_DATA_NOT_FOUND:
-			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
-		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
-		}
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 	}
 
 	for _, result := range results {

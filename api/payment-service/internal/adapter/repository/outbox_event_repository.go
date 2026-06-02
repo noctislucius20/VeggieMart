@@ -15,7 +15,7 @@ import (
 )
 
 type OutboxEventInterface interface {
-	CreateEvent(ctx context.Context, publishName string, payload any, paymentId *uint) error
+	CreateEvent(ctx context.Context, publishName string, payload any, paymentId *int64) error
 	GetAllPendingEvent(ctx context.Context) ([]entity.OutboxEventEntity, error)
 	UpdateFailedEvent(ctx context.Context, outboxIds []int64) error
 	UpdatePublishedEvent(ctx context.Context, outboxIds []int64) error
@@ -160,7 +160,7 @@ func (o *outboxEventRepository) GetAllPendingEvent(ctx context.Context) ([]entit
 }
 
 // CreateEvent implements OutboxEventInterface.
-func (o *outboxEventRepository) CreateEvent(ctx context.Context, publishName string, payload any, paymentId *uint) error {
+func (o *outboxEventRepository) CreateEvent(ctx context.Context, publishName string, payload any, paymentId *int64) error {
 	var db = o.getDB(ctx)
 
 	parsedPayload, _ := json.Marshal(payload)

@@ -3,7 +3,7 @@ package entity
 import "time"
 
 type NotificationEntity struct {
-	ID               uint       `json:"id"`
+	ID               int64      `json:"id"`
 	NotificationType string     `json:"notification_type"`
 	ReceiverID       *int64     `json:"receiver_id"`
 	Subject          *string    `json:"subject"`

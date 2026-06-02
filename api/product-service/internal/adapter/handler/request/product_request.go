@@ -18,6 +18,11 @@ type ProductDetailRequest struct {
 	RegularPrice int64  `json:"regular_price" validate:"required,number"`
 }
 
+type ProductUpdateStockRequest struct {
+	ProductID int64 `json:"product_id" validate:"required,number"`
+	Quantity  int64 `json:"quantity" validate:"required,number"`
+}
+
 type ProductBatchRequest struct {
 	IDProducts []int64 `json:"id_products" validate:"required"`
 }

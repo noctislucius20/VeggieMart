@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"product-service/config"
 	"product-service/internal/adapter/repository"
 	"product-service/internal/adapter/repository/cache"
@@ -21,6 +23,7 @@ type ProductServiceInterface interface {
 	CreateProduct(ctx context.Context, req entity.ProductEntity) (int64, error)
 	UpdateProduct(ctx context.Context, req entity.ProductEntity) error
 	DeleteProduct(ctx context.Context, productId int64) error
+	UpdateStockProduct(ctx context.Context, products []entity.ProductUpdateStockEntity) error
 
 	getAllProductsCategory(ctx context.Context, products []entity.ProductEntity) error
 }
@@ -51,6 +54,22 @@ func NewProductService(cfg *config.Config, repo repository.ProductRepositoryInte
 	}
 }
 
+// UpdateStockProduct implements [ProductServiceInterface].
+func (p *productService) UpdateStockProduct(ctx context.Context, products []entity.ProductUpdateStockEntity) error {
+	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := p.repo.UpdateStockProduct(txCtx, products); err != nil {
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		p.logger.Errorf("[ProductService-1] UpdateStockProduct: %v", err)
+		return err
+	}
+
+	return nil
+}
+
 // GetBatchProducts implements [ProductServiceInterface].
 func (p *productService) GetBatchProducts(ctx context.Context, productIds []int64) ([]entity.ProductEntity, error) {
 	var products []entity.ProductEntity
@@ -75,8 +94,9 @@ func (p *productService) GetBatchProducts(ctx context.Context, productIds []int6
 // CreateProduct implements ProductServiceInterface.
 func (p *productService) CreateProduct(ctx context.Context, req entity.ProductEntity) (int64, error) {
 	var (
-		productId   int64
-		publishName = p.cfg.PublisherName.ProductCreate
+		productId            int64
+		publishProductCreate = p.cfg.PublisherName.ProductCreate
+		outboxEventEntities  []entity.OutboxEventEntity
 	)
 
 	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
@@ -105,7 +125,15 @@ func (p *productService) CreateProduct(ctx context.Context, req entity.ProductEn
 			return err
 		}
 
-		if err := p.repoOutbox.CreateEvent(txCtx, publishName, productEntity, &productEntity.ID); err != nil {
+		jsonProduct, _ := json.Marshal(productEntity)
+
+		outboxEventEntities = append(outboxEventEntities, entity.OutboxEventEntity{
+			EventType:   publishProductCreate,
+			Payload:     string(jsonProduct),
+			AggregateID: fmt.Sprintf("%d", productIdCreated),
+		})
+
+		if err := p.repoOutbox.CreateBatchEvents(txCtx, outboxEventEntities); err != nil {
 			return err
 		}
 
@@ -130,7 +158,7 @@ func (p *productService) DeleteProduct(ctx context.Context, productId int64) err
 		}
 
 		productDeletePayload := map[string]any{
-			"product_id": productId,
+			"id": productId,
 		}
 		if err := p.repoOutbox.CreateEvent(txCtx, publishName, productDeletePayload, &productId); err != nil {
 			return err

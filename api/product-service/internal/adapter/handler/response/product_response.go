@@ -68,6 +68,7 @@ type ProductBatchResponse struct {
 	ID           int64  `json:"id"`
 	ProductImage string `json:"product_image"`
 	ProductName  string `json:"product_name"`
+	RegularPrice int64  `json:"regular_price"`
 	SalePrice    int64  `json:"sale_price"`
 	Weight       int64  `json:"weight"`
 	Unit         string `json:"unit"`

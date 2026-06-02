@@ -98,7 +98,7 @@ func (p *paymentHandler) GetPaymentById(c echo.Context) error {
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[PaymentHandler-3] GetPaymentById: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
@@ -107,14 +107,12 @@ func (p *paymentHandler) GetPaymentById(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
 	}
 
-	result, err := p.paymentService.GetPaymentById(ctx, uint(id), jwtUserData, user)
+	result, err := p.paymentService.GetPaymentById(ctx, id, jwtUserData, user)
 	if err != nil {
 		c.Logger().Errorf("[PaymentHandler-5] GetPaymentById: %v", err)
 		switch err.Error() {
 		case utils.DATA_NOT_FOUND:
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
-		case utils.RELATION_DATA_NOT_FOUND:
-			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		default:
 			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 		}
@@ -126,11 +124,12 @@ func (p *paymentHandler) GetPaymentById(c echo.Context) error {
 		PaymentMethod:   result.PaymentMethod,
 		PaymentStatus:   result.PaymentStatus,
 		GrossAmount:     result.GrossAmount,
-		ShippingType:    result.Order.OrderShippingType,
+		ShippingType:    result.Order.ShippingType,
 		PaymentAt:       result.PaymentAt,
-		OrderAt:         result.Order.OrderAt,
-		OrderRemarks:    result.Order.OrderRemarks,
+		OrderAt:         result.Order.OrderDatetime,
+		OrderRemarks:    result.Order.Remarks,
 		CustomerName:    result.Customer.CustomerName,
+		CustomerEmail:   result.Customer.CustomerEmail,
 		CustomerAddress: result.Customer.CustomerAddress,
 	}
 
@@ -159,7 +158,7 @@ func (p *paymentHandler) GetPaymentByIdAdmin(c echo.Context) error {
 	idParam := c.Param("id")
 	if idParam == "" {
 		c.Logger().Errorf("[PaymentHandler-3] GetPaymentByIdAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_INVALID))
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
@@ -168,14 +167,12 @@ func (p *paymentHandler) GetPaymentByIdAdmin(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
 	}
 
-	result, err := p.paymentService.GetPaymentById(ctx, uint(id), jwtUserData, user)
+	result, err := p.paymentService.GetPaymentById(ctx, id, jwtUserData, user)
 	if err != nil {
 		c.Logger().Errorf("[PaymentHandler-5] GetPaymentByIdAdmin: %v", err)
 		switch err.Error() {
 		case utils.DATA_NOT_FOUND:
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
-		case utils.RELATION_DATA_NOT_FOUND:
-			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		default:
 			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 		}
@@ -183,15 +180,16 @@ func (p *paymentHandler) GetPaymentByIdAdmin(c echo.Context) error {
 
 	respPayment = response.PaymentDetailResponse{
 		ID:              int64(result.ID),
-		OrderCode:       result.Order.OrderCode,
 		PaymentMethod:   result.PaymentMethod,
 		PaymentStatus:   result.PaymentStatus,
 		GrossAmount:     result.GrossAmount,
-		ShippingType:    result.Order.OrderShippingType,
 		PaymentAt:       result.PaymentAt,
-		OrderAt:         result.Order.OrderAt,
-		OrderRemarks:    result.Order.OrderRemarks,
+		OrderCode:       result.Order.OrderCode,
+		ShippingType:    result.Order.ShippingType,
+		OrderAt:         result.Order.OrderDatetime,
+		OrderRemarks:    result.Order.Remarks,
 		CustomerName:    result.Customer.CustomerName,
+		CustomerEmail:   result.Customer.CustomerEmail,
 		CustomerAddress: result.Customer.CustomerAddress,
 	}
 
@@ -214,12 +212,7 @@ func (p *paymentHandler) GetAllPayments(c echo.Context) error {
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
 		c.Logger().Errorf("[PaymentHandler-2] GetAllPayments: %v", err)
-		switch err.Error() {
-		case utils.RELATION_DATA_NOT_FOUND:
-			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
-		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
-		}
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 	}
 
 	userId := jwtUserData.UserID
@@ -268,12 +261,12 @@ func (p *paymentHandler) GetAllPayments(c echo.Context) error {
 
 	for _, result := range results {
 		respPayments = append(respPayments, response.PaymentListResponse{
-			ID:            uint64(result.ID),
+			ID:            int64(result.ID),
 			OrderCode:     result.Order.OrderCode,
 			PaymentStatus: result.PaymentStatus,
 			PaymentMethod: result.PaymentMethod,
 			GrossAmount:   result.GrossAmount,
-			ShippingType:  result.Order.OrderShippingType,
+			ShippingType:  result.Order.ShippingType,
 		})
 	}
 
@@ -338,22 +331,17 @@ func (p *paymentHandler) GetAllPaymentsAdmin(c echo.Context) error {
 	results, countData, totalPages, err := p.paymentService.GetAllPayments(ctx, reqEntity, user)
 	if err != nil {
 		c.Logger().Errorf("[PaymentHandler-4] GetAllPaymentsAdmin: %v", err)
-		switch err.Error() {
-		case utils.RELATION_DATA_NOT_FOUND:
-			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
-		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
-		}
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 	}
 
 	for _, result := range results {
 		respPayments = append(respPayments, response.PaymentListResponse{
-			ID:            uint64(result.ID),
+			ID:            int64(result.ID),
 			OrderCode:     result.Order.OrderCode,
 			PaymentStatus: result.PaymentStatus,
 			PaymentMethod: result.PaymentMethod,
 			GrossAmount:   result.GrossAmount,
-			ShippingType:  result.Order.OrderShippingType,
+			ShippingType:  result.Order.ShippingType,
 		})
 	}
 
@@ -432,17 +420,21 @@ func (p *paymentHandler) CreatePayment(c echo.Context) error {
 	}
 
 	reqEntity := entity.PaymentEntity{
-		OrderID:       req.OrderID,
 		PaymentMethod: req.PaymentMethod,
 		GrossAmount:   req.GrassAmount,
-		UserID:        req.UserID,
+		UserID:        jwtUserData.UserID,
 		Remarks:       req.Remarks,
+		Order: entity.OrderEntity{
+			ID: int64(req.OrderID),
+		},
 	}
 
 	result, err := p.paymentService.ProcessPayment(ctx, reqEntity, jwtUserData)
 	if err != nil {
 		c.Logger().Errorf("[PaymentHandler-5] CreatePayment: %v", err)
 		switch err.Error() {
+		case utils.RELATION_DATA_NOT_FOUND:
+			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		case utils.INVALID_PAYMENT_METHOD:
 			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		default:

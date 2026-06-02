@@ -16,10 +16,10 @@ import (
 
 type NotificationRepositoryInterface interface {
 	GetAllNotifications(ctx context.Context, query entity.NotificationQueryString) ([]entity.NotificationEntity, int64, int64, error)
-	GetNotificationById(ctx context.Context, notificationId uint) (*entity.NotificationEntity, error)
+	GetNotificationById(ctx context.Context, notificationId int64) (*entity.NotificationEntity, error)
 	CreateNotification(ctx context.Context, notification entity.NotificationEntity) error
-	MarkAsSentNotification(ctx context.Context, notificationId uint) error
-	MarkAsReadNotification(ctx context.Context, notificationId uint) error
+	MarkAsSentNotification(ctx context.Context, notificationId int64) error
+	MarkAsReadNotification(ctx context.Context, notificationId int64) error
 
 	getDB(ctx context.Context) *gorm.DB
 }
@@ -43,7 +43,7 @@ func (n *notificationRepository) getDB(ctx context.Context) *gorm.DB {
 }
 
 // MarkAsReadNotification implements [NotificationRepositoryInterface].
-func (n *notificationRepository) MarkAsReadNotification(ctx context.Context, notificationId uint) error {
+func (n *notificationRepository) MarkAsReadNotification(ctx context.Context, notificationId int64) error {
 	var (
 		db                = n.getDB(ctx)
 		now               = time.Now()
@@ -62,7 +62,7 @@ func (n *notificationRepository) MarkAsReadNotification(ctx context.Context, not
 }
 
 // MarkAsSentNotification implements [NotificationRepositoryInterface].
-func (n *notificationRepository) MarkAsSentNotification(ctx context.Context, notificationId uint) error {
+func (n *notificationRepository) MarkAsSentNotification(ctx context.Context, notificationId int64) error {
 	var (
 		db                = n.getDB(ctx)
 		modelNotification = model.Notification{
@@ -104,7 +104,7 @@ func (n *notificationRepository) CreateNotification(ctx context.Context, notific
 }
 
 // GetNotificationById implements [NotificationRepositoryInterface].
-func (n *notificationRepository) GetNotificationById(ctx context.Context, notificationId uint) (*entity.NotificationEntity, error) {
+func (n *notificationRepository) GetNotificationById(ctx context.Context, notificationId int64) (*entity.NotificationEntity, error) {
 	var (
 		db                = n.getDB(ctx)
 		modelNotification model.Notification

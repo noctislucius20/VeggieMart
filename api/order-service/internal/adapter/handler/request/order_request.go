@@ -1,7 +1,6 @@
 package request
 
 type CreateOrderRequest struct {
-	BuyerID      int64                 `json:"buyer_id" validate:"required"`
 	OrderDate    string                `json:"order_date" validate:"required"`
 	TotalAmount  int64                 `json:"total_amount" validate:"required"`
 	ShippingType string                `json:"shipping_type" validate:"required"`

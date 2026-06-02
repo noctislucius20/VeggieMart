@@ -16,7 +16,7 @@ import (
 )
 
 type PaymentCacheInterface interface {
-	GetPaymentById(ctx context.Context, paymentId uint, userId uint) (*entity.PaymentEntity, error)
+	GetPaymentById(ctx context.Context, paymentId int64, userId int64) (*entity.PaymentEntity, error)
 	GetRoleById(ctx context.Context, id int64) (*entity.RoleEntity, error)
 	DeletePaymentCache(ctx context.Context, id int64) error
 }
@@ -55,7 +55,7 @@ func (p *paymentCache) GetRoleById(ctx context.Context, id int64) (*entity.RoleE
 }
 
 // GetPaymentById implements [PaymentCacheInterface].
-func (p *paymentCache) GetPaymentById(ctx context.Context, paymentId uint, userId uint) (*entity.PaymentEntity, error) {
+func (p *paymentCache) GetPaymentById(ctx context.Context, paymentId int64, userId int64) (*entity.PaymentEntity, error) {
 	var (
 		payment entity.PaymentEntity
 		key     = fmt.Sprintf("payment:id:%d", paymentId)

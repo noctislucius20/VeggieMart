@@ -8,6 +8,8 @@ type UserResponseEntity struct {
 	Email   string `json:"email"`
 	Phone   string `json:"phone"`
 	Address string `json:"address"`
+	Lat     string `json:"lat"`
+	Lng     string `json:"lng"`
 	// Photo    string `json:"photo"`
 }
 

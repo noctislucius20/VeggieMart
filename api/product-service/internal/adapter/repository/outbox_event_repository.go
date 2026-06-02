@@ -16,6 +16,7 @@ import (
 
 type OutboxEventInterface interface {
 	CreateEvent(ctx context.Context, publishName string, payload any, productId *int64) error
+	CreateBatchEvents(ctx context.Context, outboxEvents []entity.OutboxEventEntity) error
 	GetAllPendingEvent(ctx context.Context) ([]entity.OutboxEventEntity, error)
 	UpdateFailedEvent(ctx context.Context, outboxIds []int64) error
 	UpdatePublishedEvent(ctx context.Context, outboxIds []int64) error
@@ -42,6 +43,32 @@ func (o *outboxEventRepository) getDB(ctx context.Context) *gorm.DB {
 	}
 
 	return o.db
+}
+
+// CreateBatchEvents implements [OutboxEventInterface].
+func (o *outboxEventRepository) CreateBatchEvents(ctx context.Context, outboxEvents []entity.OutboxEventEntity) error {
+	var (
+		db            = o.getDB(ctx)
+		modelOutboxes []model.OutboxEvent
+		timeNow       = time.Now()
+	)
+
+	for _, event := range outboxEvents {
+		modelOutboxes = append(modelOutboxes, model.OutboxEvent{
+			EventType:   event.EventType,
+			AggregateID: event.AggregateID,
+			Payload:     event.Payload,
+			Status:      "PENDING",
+			NextRetryAt: &timeNow,
+		})
+	}
+
+	if err := db.WithContext(ctx).CreateInBatches(&modelOutboxes, 10).Error; err != nil {
+		o.logger.Errorf("[OutboxEventRepository-1] CreateBatchEvents: %v", err)
+		return err
+	}
+
+	return nil
 }
 
 // UpdateFailedEvent implements OutboxEventInterface.

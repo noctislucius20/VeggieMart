@@ -9,19 +9,58 @@ import (
 	httpclient "order-service/internal/adapter/http_client"
 	"order-service/internal/core/domain/entity"
 	"order-service/utils"
-	"strconv"
 )
 
 type HttpServiceInterface interface {
-	HttpProductsAllService(productIds []int64, userData string) (map[int64]entity.ProductResponseEntity, error)
-	HttpUsersAllAdminService(userId []int64, userData string) (map[int64]entity.UserResponseEntity, error)
-	HttpUserByIdAdminService(userId int64, userData string) (*entity.UserResponseEntity, error)
+	HttpGetProductsService(productIds []int64, userData string) (map[int64]entity.ProductResponseEntity, error)
+	HttpUpdateStockProductsService(products []entity.OrderItemEntity, userData string) error
 	HttpUserByIdService(userData string) (*entity.UserResponseEntity, error)
 }
 
 type httpService struct {
 	cfg        *config.Config
 	httpClient httpclient.HttpClientInterface
+}
+
+// HttpUpdateStockProductsService implements [HttpServiceInterface].
+func (h *httpService) HttpUpdateStockProductsService(products []entity.OrderItemEntity, userData string) error {
+	baseUrlProducts := fmt.Sprintf("%s%s", h.cfg.App.ProductServiceUrl, "/products/stock")
+
+	userDataEntity := entity.JwtUserData{}
+	if err := json.Unmarshal([]byte(userData), &userDataEntity); err != nil {
+		return err
+	}
+
+	header := map[string]string{
+		"Authorization": "Bearer " + userDataEntity.Token,
+		"Content-Type":  "application/json",
+	}
+
+	req := []map[string]int64{}
+	for _, rp := range products {
+		req = append(req, map[string]int64{
+			"product_id": rp.ProductID,
+			"quantity":   rp.Quantity,
+		})
+	}
+
+	payload, _ := json.Marshal(req)
+
+	productsFetch, err := h.httpClient.CallURL("POST", baseUrlProducts, header, payload)
+	if err != nil {
+		return err
+	}
+
+	if productsFetch.StatusCode != 200 {
+		switch productsFetch.StatusCode {
+		case 409:
+			return errors.New(utils.STOCK_UNAVAILABLE)
+		default:
+			return errors.New(utils.INTERNAL_SERVER_ERROR)
+		}
+	}
+
+	return nil
 }
 
 // HttpUserByIdService implements [HttpServiceInterface].
@@ -46,7 +85,7 @@ func (h *httpService) HttpUserByIdService(userData string) (*entity.UserResponse
 	if userFetch.StatusCode != 200 {
 		switch userFetch.StatusCode {
 		case 404:
-			err := errors.New(utils.DATA_NOT_FOUND)
+			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
 			return nil, err
 		default:
 			err := errors.New(utils.INTERNAL_SERVER_ERROR)
@@ -68,106 +107,8 @@ func (h *httpService) HttpUserByIdService(userData string) (*entity.UserResponse
 	return &userResponse.Data, nil
 }
 
-// HttpUserByIdAdminService implements [HttpServiceInterface].
-func (h *httpService) HttpUserByIdAdminService(userId int64, userData string) (*entity.UserResponseEntity, error) {
-	baseUrlUser := fmt.Sprintf("%s%s", h.cfg.App.UserServiceUrl, "/users/customers/"+strconv.Itoa(int(userId)))
-
-	userDataEntity := entity.JwtUserData{}
-	if err := json.Unmarshal([]byte(userData), &userDataEntity); err != nil {
-		return nil, err
-	}
-
-	header := map[string]string{
-		"Authorization": "Bearer " + userDataEntity.Token,
-		"Content-Type":  "application/json",
-	}
-
-	userFetch, err := h.httpClient.CallURL("GET", baseUrlUser, header, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if userFetch.StatusCode != 200 {
-		switch userFetch.StatusCode {
-		case 404:
-			err := errors.New(utils.DATA_NOT_FOUND)
-			return nil, err
-		default:
-			err := errors.New(utils.INTERNAL_SERVER_ERROR)
-			return nil, err
-		}
-	}
-
-	body, err := io.ReadAll(userFetch.Body)
-	if err != nil {
-		return nil, err
-	}
-	defer userFetch.Body.Close()
-
-	userResponse := entity.UserHttpClientResponse{}
-	if err := json.Unmarshal(body, &userResponse); err != nil {
-		return nil, err
-	}
-
-	return &userResponse.Data, nil
-}
-
-// HttpUsersAllAdminService implements [HttpServiceInterface].
-func (h *httpService) HttpUsersAllAdminService(userIds []int64, userData string) (map[int64]entity.UserResponseEntity, error) {
-	baseUrlUser := fmt.Sprintf("%s%s", h.cfg.App.UserServiceUrl, "/users/customers/batch")
-
-	userDataEntity := entity.JwtUserData{}
-	if err := json.Unmarshal([]byte(userData), &userDataEntity); err != nil {
-		return nil, err
-	}
-
-	header := map[string]string{
-		"Authorization": "Bearer " + userDataEntity.Token,
-		"Content-Type":  "application/json",
-	}
-
-	payload, err := json.Marshal(map[string][]int64{"id_users": userIds})
-	if err != nil {
-		return nil, err
-	}
-
-	userFetch, err := h.httpClient.CallURL("POST", baseUrlUser, header, payload)
-	if err != nil {
-		return nil, err
-	}
-
-	if userFetch.StatusCode != 200 {
-		switch userFetch.StatusCode {
-		case 404:
-			err := errors.New(utils.DATA_NOT_FOUND)
-			return nil, err
-		default:
-			err := errors.New(utils.INTERNAL_SERVER_ERROR)
-			return nil, err
-		}
-	}
-
-	body, err := io.ReadAll(userFetch.Body)
-	if err != nil {
-		return nil, err
-	}
-	defer userFetch.Body.Close()
-
-	userResponse := entity.UsersHttpClientResponse{}
-	if err := json.Unmarshal(body, &userResponse); err != nil {
-		return nil, err
-	}
-
-	usersMap := map[int64]entity.UserResponseEntity{}
-	for _, p := range userResponse.Data {
-		usersMap[p.ID] = p
-	}
-
-	return usersMap, nil
-}
-
-// HttpProductsAllService implements [HttpServiceInterface].
-func (h *httpService) HttpProductsAllService(productIds []int64, userData string) (map[int64]entity.ProductResponseEntity, error) {
+// HttpGetProductsService implements [HttpServiceInterface].
+func (h *httpService) HttpGetProductsService(productIds []int64, userData string) (map[int64]entity.ProductResponseEntity, error) {
 	baseUrlProducts := fmt.Sprintf("%s%s", h.cfg.App.ProductServiceUrl, "/products/batch")
 
 	userDataEntity := entity.JwtUserData{}
@@ -190,11 +131,9 @@ func (h *httpService) HttpProductsAllService(productIds []int64, userData string
 	if productsFetch.StatusCode != 200 {
 		switch productsFetch.StatusCode {
 		case 404:
-			err := errors.New(utils.DATA_NOT_FOUND)
-			return nil, err
+			return nil, errors.New(utils.RELATION_DATA_NOT_FOUND)
 		default:
-			err := errors.New(utils.INTERNAL_SERVER_ERROR)
-			return nil, err
+			return nil, errors.New(utils.INTERNAL_SERVER_ERROR)
 		}
 	}
 

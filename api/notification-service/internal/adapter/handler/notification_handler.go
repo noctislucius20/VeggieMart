@@ -52,7 +52,7 @@ func (n *notificationHandler) MarkAsReadNotification(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.INVALID_ID))
 	}
 
-	if err := n.notificationService.MarkAsReadNotification(ctx, uint(id)); err != nil {
+	if err := n.notificationService.MarkAsReadNotification(ctx, int64(id)); err != nil {
 		c.Logger().Errorf("[NotificationHandler-4] MarkAsReadNotification: %v", err)
 		if err.Error() == utils.DATA_NOT_FOUND {
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.DATA_NOT_FOUND))
@@ -88,7 +88,7 @@ func (n *notificationHandler) GetNotificationById(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id invalid"))
 	}
 
-	result, err := n.notificationService.GetNotificationById(ctx, uint(id))
+	result, err := n.notificationService.GetNotificationById(ctx, int64(id))
 	if err != nil {
 		c.Logger().Errorf("[NotificationHandler-4] GetNotificationById: %v", err)
 		if err.Error() == utils.DATA_NOT_FOUND {

@@ -47,7 +47,6 @@ type Elasticsearch struct {
 }
 
 type PublisherName struct {
-	ProductUpdateStock     string `json:"product_update_stock"`
 	OrderCreate            string `json:"order_create"`
 	EmailUpdateOrderStatus string `json:"email_update_order_status"`
 	OrderPaymentSuccess    string `json:"order_payment_success"`
@@ -106,7 +105,6 @@ func NewConfig() *Config {
 			Port: viper.GetString("ELASTICSEARCH_PORT"),
 		},
 		PublisherName: PublisherName{
-			ProductUpdateStock:     viper.GetString("PRODUCT_UPDATE_STOCK"),
 			OrderCreate:            viper.GetString("ORDER_CREATE"),
 			EmailUpdateOrderStatus: viper.GetString("EMAIL_UPDATE_ORDER_STATUS"),
 			OrderPaymentSuccess:    viper.GetString("ORDER_PAYMENT_SUCCESS"),

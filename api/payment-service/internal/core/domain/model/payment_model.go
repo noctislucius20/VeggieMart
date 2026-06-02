@@ -7,9 +7,8 @@ import (
 )
 
 type Payment struct {
-	ID               uint            `gorm:"primaryKey" json:"id"`
-	OrderID          uint            `gorm:"not null;index" json:"order_id"`
-	UserID           uint            `gorm:"not null;index" json:"user_id"`
+	ID               int64           `gorm:"primaryKey" json:"id"`
+	UserID           int64           `gorm:"type:bigint;not null;index" json:"user_id"`
 	PaymentMethod    string          `gorm:"type:varchar(50);not null" json:"payment_method"`
 	PaymentStatus    string          `gorm:"type:varchar(50);not null" json:"payment_status"`
 	PaymentGatewayID *string         `gorm:"type:varchar(50)" json:"payment_gateway_id,omitempty"`
@@ -19,4 +18,5 @@ type Payment struct {
 	UpdatedAt        time.Time       `gorm:"type:timestamp" json:"updated_at"`
 	DeletedAt        *gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 	PaymentLogs      []PaymentLog    `gorm:"foreignKey:PaymentID;constraint:OnDelete:CASCADE"`
+	OrderSnapshot    *OrderSnapshot  `gorm:"foreignKey:PaymentID;constraint:OnDelete:CASCADE"`
 }

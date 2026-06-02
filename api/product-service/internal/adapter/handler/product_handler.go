@@ -27,6 +27,7 @@ type ProductHandlerInterface interface {
 	CreateProductAdmin(c echo.Context) error
 	UpdateProductAdmin(c echo.Context) error
 	DeleteProductAdmin(c echo.Context) error
+	UpdateStockProduct(c echo.Context) error
 
 	GetAllProductsHome(c echo.Context) error
 	GetAllProductsShop(c echo.Context) error
@@ -75,8 +76,53 @@ func NewProductHandler(e *echo.Echo, cfg *config.Config, service service.Product
 
 	// authGroup := e.Group("auth", mid.CheckToken())
 	e.POST("/products/batch", productHandler.GetBatchProducts, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	e.POST("/products/stock", productHandler.UpdateStockProduct, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 
 	return productHandler
+}
+
+// UpdateStockProduct implements [ProductHandlerInterface].
+func (p *productHandler) UpdateStockProduct(c echo.Context) error {
+	var (
+		ctx = c.Request().Context()
+		req = []request.ProductUpdateStockRequest{}
+	)
+
+	user := c.Get("user").(string)
+	if user == "" {
+		c.Logger().Errorf("[ProductHandler-1] UpdateStockProduct: %v", "data token not found")
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	}
+
+	if err := c.Bind(&req); err != nil {
+		c.Logger().Errorf("[ProductHandler-2] UpdateStockProduct: %v", err)
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
+	}
+
+	if err := c.Validate(&req); err != nil {
+		c.Logger().Errorf("[ProductHandler-3] UpdateStockProduct: %v", err)
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
+	}
+
+	reqEntity := []entity.ProductUpdateStockEntity{}
+	for _, rp := range req {
+		reqEntity = append(reqEntity, entity.ProductUpdateStockEntity{
+			ProductID: rp.ProductID,
+			Quantity:  rp.Quantity,
+		})
+	}
+
+	if err := p.service.UpdateStockProduct(ctx, reqEntity); err != nil {
+		c.Logger().Errorf("[ProductHandler-4] UpdateStockProduct: %v", err)
+		switch err.Error() {
+		case utils.STOCK_UNAVAILABLE:
+			return c.JSON(http.StatusConflict, response.ResponseFailed(err.Error()))
+		default:
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		}
+	}
+
+	return c.JSON(http.StatusOK, response.ResponseSuccess(nil))
 }
 
 // GetDetailProductHome implements ProductHandlerInterface.
@@ -182,7 +228,10 @@ func (p *productHandler) GetAllProductsShop(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
-	// TODO: check if price range is valid
+	if startPrice > 0 && endPrice > 0 && startPrice > endPrice {
+		c.Logger().Errorf("[ProductHandler-5] GetAllProductsShop: %v", err)
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.PRICE_RANGE_INVALID))
+	}
 
 	reqEntity := entity.QueryStringProduct{
 		Search:     search,
@@ -196,7 +245,7 @@ func (p *productHandler) GetAllProductsShop(c echo.Context) error {
 
 	results, totalPage, countData, err := p.service.GetAllProducts(ctx, reqEntity)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-5] GetAllProductsShop: %v", err)
+		c.Logger().Errorf("[ProductHandler-6] GetAllProductsShop: %v", err)
 		switch err.Error() {
 		case utils.RELATION_DATA_NOT_FOUND:
 			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
@@ -567,6 +616,7 @@ func (p *productHandler) GetBatchProducts(c echo.Context) error {
 			ID:           result.ID,
 			ProductImage: result.Image,
 			ProductName:  result.Name,
+			RegularPrice: int64(result.RegularPrice),
 			SalePrice:    int64(result.SalePrice),
 			Weight:       result.Weight,
 			Unit:         result.Unit,

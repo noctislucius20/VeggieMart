@@ -44,9 +44,10 @@ type ElasticSearch struct {
 }
 
 type PublisherName struct {
-	ProductCreate string `json:"product_create"`
-	ProductDelete string `json:"product_delete"`
-	ProductUpdate string `json:"product_update"`
+	ProductCreate         string `json:"product_create"`
+	ProductDelete         string `json:"product_delete"`
+	ProductUpdate         string `json:"product_update"`
+	OrderStockUnavailable string `json:"order_stock_unavailable"`
 }
 
 type Config struct {
@@ -99,9 +100,10 @@ func NewConfig() *Config {
 			Port: viper.GetString("ELASTICSEARCH_PORT"),
 		},
 		PublisherName: PublisherName{
-			ProductCreate: viper.GetString("PRODUCT_CREATE"),
-			ProductDelete: viper.GetString("PRODUCT_DELETE"),
-			ProductUpdate: viper.GetString("PRODUCT_UPDATE"),
+			ProductCreate:         viper.GetString("PRODUCT_CREATE"),
+			ProductDelete:         viper.GetString("PRODUCT_DELETE"),
+			ProductUpdate:         viper.GetString("PRODUCT_UPDATE"),
+			OrderStockUnavailable: viper.GetString("ORDER_STOCK_UNAVAILABLE"),
 		},
 	}
 }

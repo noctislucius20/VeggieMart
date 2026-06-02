@@ -1,7 +1,7 @@
 package response
 
 type PaymentListResponse struct {
-	ID            uint64  `json:"id"`
+	ID            int64   `json:"id"`
 	OrderCode     string  `json:"order_code"`
 	PaymentStatus string  `json:"payment_status"`
 	PaymentMethod string  `json:"payment_method"`
@@ -20,5 +20,6 @@ type PaymentDetailResponse struct {
 	OrderAt         string  `json:"order_at"`
 	OrderRemarks    string  `json:"order_remarks"`
 	CustomerName    string  `json:"customer_name"`
+	CustomerEmail   string  `json:"customer_email"`
 	CustomerAddress string  `json:"customer_address"`
 }

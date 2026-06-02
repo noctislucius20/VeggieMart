@@ -421,8 +421,8 @@ func (u *userRepository) GetProfileById(ctx context.Context, userId int64) (*ent
 
 	return &entity.UserEntity{
 		ID:      modelUser.ID,
-		Name:    modelUser.Email,
-		Email:   modelUser.Name,
+		Name:    modelUser.Name,
+		Email:   modelUser.Email,
 		RoleID:  modelUser.Roles[0].ID,
 		Address: modelUser.Address,
 		Lat:     modelUser.Lat,

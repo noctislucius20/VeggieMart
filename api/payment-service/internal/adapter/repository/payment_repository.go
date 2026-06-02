@@ -7,6 +7,7 @@ import (
 	"payment-service/internal/core/domain/entity"
 	"payment-service/internal/core/domain/model"
 	"payment-service/utils"
+	"time"
 
 	"github.com/labstack/gommon/log"
 	"gorm.io/gorm"
@@ -14,11 +15,12 @@ import (
 )
 
 type PaymentRepositoryInterface interface {
-	CreatePayment(ctx context.Context, payment *entity.PaymentEntity) (uint, string, error)
-	CreatePaymentLog(ctx context.Context, paymentId uint, status string) error
-	GetPaymentById(ctx context.Context, paymentId uint, userId uint) (*entity.PaymentEntity, error)
-	UpdateStatusByOrderCode(ctx context.Context, orderId uint, status string) (uint, error)
+	CreatePayment(ctx context.Context, payment *entity.PaymentEntity) (int64, string, error)
+	CreatePaymentLog(ctx context.Context, paymentId int64, status string) error
+	GetPaymentById(ctx context.Context, paymentId int64, userId int64) (*entity.PaymentEntity, error)
+	UpdateStatusByOrderCode(ctx context.Context, orderId int64, status string) (int64, error)
 	GetAllPayments(ctx context.Context, query entity.QueryStringPayment) ([]entity.PaymentEntity, int64, int64, error)
+	GetOrderIdByOrderCode(ctx context.Context, orderCode string) (int64, error)
 }
 
 type paymentRepository struct {
@@ -39,6 +41,28 @@ func (p *paymentRepository) getDB(ctx context.Context) *gorm.DB {
 	return p.db
 }
 
+// GetOrderIdByOrderCode implements [PaymentRepositoryInterface].
+func (p *paymentRepository) GetOrderIdByOrderCode(ctx context.Context, orderCode string) (int64, error) {
+	var (
+		db                 = p.getDB(ctx)
+		modelOrderSnapshot model.OrderSnapshot
+	)
+
+	if err := db.WithContext(ctx).
+		Select("id", "order_id").
+		Where("order_code = ?", orderCode).
+		Order("id DESC").
+		First(&modelOrderSnapshot).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			err = errors.New(utils.DATA_NOT_FOUND)
+		}
+		p.logger.Errorf("[PaymentRepository-1] GetOrderIdByOrderCode: %v", err)
+		return 0, err
+	}
+
+	return modelOrderSnapshot.OrderID, nil
+}
+
 // GetAllPayments implements [PaymentRepositoryInterface].
 func (p *paymentRepository) GetAllPayments(ctx context.Context, query entity.QueryStringPayment) ([]entity.PaymentEntity, int64, int64, error) {
 	var (
@@ -51,6 +75,9 @@ func (p *paymentRepository) GetAllPayments(ctx context.Context, query entity.Que
 	offset := (query.Page - 1) * query.Limit
 
 	sqlMain := db.WithContext(ctx).
+		Preload("OrderSnapshot", func(db *gorm.DB) *gorm.DB {
+			return db.Select("id", "payment_id", "order_id", "shipping_type", "order_code")
+		}).
 		Where("payment_method ILIKE ? OR payment_status ILIKE ?", "%"+query.Search+"%", "%"+query.Status+"%")
 
 	if query.UserID != 0 {
@@ -74,13 +101,17 @@ func (p *paymentRepository) GetAllPayments(ctx context.Context, query entity.Que
 	for _, val := range modelPayments {
 		entities = append(entities, entity.PaymentEntity{
 			ID:               val.ID,
-			OrderID:          val.OrderID,
 			UserID:           val.UserID,
 			PaymentMethod:    val.PaymentMethod,
 			PaymentStatus:    val.PaymentStatus,
 			PaymentGatewayID: *val.PaymentGatewayID,
 			GrossAmount:      val.GrossAmount,
 			PaymentURL:       *val.PaymentURL,
+			Order: entity.OrderEntity{
+				ID:           val.OrderSnapshot.OrderID,
+				OrderCode:    val.OrderSnapshot.OrderCode,
+				ShippingType: val.OrderSnapshot.ShippingType,
+			},
 		})
 	}
 
@@ -88,7 +119,7 @@ func (p *paymentRepository) GetAllPayments(ctx context.Context, query entity.Que
 }
 
 // UpdateStatusByOrderCode implements [PaymentRepositoryInterface].
-func (p *paymentRepository) UpdateStatusByOrderCode(ctx context.Context, orderId uint, status string) (uint, error) {
+func (p *paymentRepository) UpdateStatusByOrderCode(ctx context.Context, orderId int64, status string) (int64, error) {
 	var (
 		db           = p.getDB(ctx)
 		modelPayment = model.Payment{
@@ -121,17 +152,20 @@ func (p *paymentRepository) UpdateStatusByOrderCode(ctx context.Context, orderId
 }
 
 // GetPaymentById implements [PaymentRepositoryInterface].
-func (p *paymentRepository) GetPaymentById(ctx context.Context, paymentId uint, userId uint) (*entity.PaymentEntity, error) {
+func (p *paymentRepository) GetPaymentById(ctx context.Context, paymentId int64, userId int64) (*entity.PaymentEntity, error) {
 	var (
 		db            = p.getDB(ctx)
 		modelPayment  model.Payment
 		paymentEntity entity.PaymentEntity
 	)
 
-	sqlMain := db.Debug().WithContext(ctx).
+	sqlMain := db.WithContext(ctx).
 		Omit("updated_at", "deleted_at").
 		Preload("PaymentLogs", func(db *gorm.DB) *gorm.DB {
 			return db.Select("id", "payment_id", "status")
+		}).
+		Preload("OrderSnapshot", func(db *gorm.DB) *gorm.DB {
+			return db.Select("id", "payment_id", "order_id", "order_code", "shipping_type", "remarks", "order_datetime", "customer_name", "customer_address", "customer_email")
 		})
 
 	if userId != 0 {
@@ -149,7 +183,6 @@ func (p *paymentRepository) GetPaymentById(ctx context.Context, paymentId uint, 
 
 	paymentEntity = entity.PaymentEntity{
 		ID:               modelPayment.ID,
-		OrderID:          modelPayment.OrderID,
 		UserID:           modelPayment.UserID,
 		PaymentMethod:    modelPayment.PaymentMethod,
 		PaymentStatus:    modelPayment.PaymentStatus,
@@ -157,6 +190,18 @@ func (p *paymentRepository) GetPaymentById(ctx context.Context, paymentId uint, 
 		GrossAmount:      modelPayment.GrossAmount,
 		PaymentURL:       *modelPayment.PaymentURL,
 		PaymentAt:        modelPayment.CreatedAt.Format("2006-01-02 15:05:05"),
+		Order: entity.OrderEntity{
+			ID:            modelPayment.OrderSnapshot.OrderID,
+			OrderCode:     modelPayment.OrderSnapshot.OrderCode,
+			ShippingType:  modelPayment.OrderSnapshot.ShippingType,
+			OrderDatetime: modelPayment.OrderSnapshot.OrderDatetime.Format("2006-01-02 15:05:05"),
+			Remarks:       modelPayment.OrderSnapshot.Remarks,
+		},
+		Customer: entity.CustomerEntity{
+			CustomerName:    modelPayment.OrderSnapshot.CustomerName,
+			CustomerEmail:   modelPayment.OrderSnapshot.CustomerEmail,
+			CustomerAddress: modelPayment.OrderSnapshot.CustomerAddress,
+		},
 	}
 
 	for _, item := range modelPayment.PaymentLogs {
@@ -171,7 +216,7 @@ func (p *paymentRepository) GetPaymentById(ctx context.Context, paymentId uint, 
 }
 
 // CreatePaymentLog implements [PaymentRepositoryInterface].
-func (p *paymentRepository) CreatePaymentLog(ctx context.Context, paymentId uint, status string) error {
+func (p *paymentRepository) CreatePaymentLog(ctx context.Context, paymentId int64, status string) error {
 	var (
 		db              = p.getDB(ctx)
 		modelPaymentLog = model.PaymentLog{
@@ -189,17 +234,37 @@ func (p *paymentRepository) CreatePaymentLog(ctx context.Context, paymentId uint
 }
 
 // CreatePayment implements [PaymentRepositoryInterface].
-func (p *paymentRepository) CreatePayment(ctx context.Context, payment *entity.PaymentEntity) (uint, string, error) {
+func (p *paymentRepository) CreatePayment(ctx context.Context, payment *entity.PaymentEntity) (int64, string, error) {
+	parsedDatetime, err := time.Parse("2006-01-02 15:04:05", payment.Order.OrderDatetime)
+	if err != nil {
+		return 0, "", err
+	}
+
 	var (
 		db           = p.getDB(ctx)
 		modelPayment = model.Payment{
-			OrderID:          payment.OrderID,
-			UserID:           payment.UserID,
+			UserID:           int64(payment.Customer.CustomerID),
 			PaymentMethod:    payment.PaymentMethod,
 			PaymentStatus:    payment.PaymentStatus,
 			PaymentGatewayID: &payment.PaymentGatewayID,
 			GrossAmount:      payment.GrossAmount,
 			PaymentURL:       &payment.PaymentURL,
+			OrderSnapshot: &model.OrderSnapshot{
+				OrderID:         payment.Order.ID,
+				OrderCode:       payment.Order.OrderCode,
+				OrderDatetime:   parsedDatetime,
+				Status:          payment.Order.Status,
+				PaymentMethod:   payment.PaymentMethod,
+				ShippingFee:     float64(payment.Order.ShippingFee),
+				ShippingType:    payment.Order.ShippingType,
+				Remarks:         payment.Order.Remarks,
+				TotalAmount:     float64(payment.Order.TotalAmount),
+				CustomerID:      payment.Customer.CustomerID,
+				CustomerName:    payment.Customer.CustomerName,
+				CustomerEmail:   payment.Customer.CustomerEmail,
+				CustomerAddress: payment.Customer.CustomerAddress,
+				CustomerPhone:   payment.Customer.CustomerPhone,
+			},
 		}
 	)
 

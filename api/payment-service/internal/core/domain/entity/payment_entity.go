@@ -1,9 +1,8 @@
 package entity
 
 type PaymentEntity struct {
-	ID               uint               `json:"id"`
-	OrderID          uint               `json:"order_id"`
-	UserID           uint               `json:"user_id"`
+	ID               int64              `json:"id"`
+	UserID           int64              `json:"user_id"`
 	PaymentMethod    string             `json:"payment_method"`
 	PaymentStatus    string             `json:"payment_status"`
 	PaymentGatewayID string             `json:"payment_gateway_id"`
@@ -27,15 +26,20 @@ type QueryStringPayment struct {
 }
 
 type OrderEntity struct {
-	OrderCode         string `json:"order_code"`
-	OrderShippingType string `json:"order_shipping_type"`
-	OrderAt           string `json:"order_at"`
-	OrderStatus       string `json:"order_status"`
-	OrderRemarks      string `json:"order_remarks"`
+	ID            int64  `json:"id"`
+	OrderCode     string `json:"order_code"`
+	OrderDatetime string `json:"order_datetime"`
+	Status        string `json:"status"`
+	ShippingFee   int64  `json:"shipping_fee"`
+	ShippingType  string `json:"shipping_type"`
+	Remarks       string `json:"remarks"`
+	TotalAmount   int64  `json:"total_amount"`
 }
 
 type CustomerEntity struct {
+	CustomerID      int64  `json:"customer_id"`
 	CustomerName    string `json:"customer_name"`
-	CustomerEmail   string `json:"customer_email"`
+	CustomerPhone   string `json:"customer_phone"`
 	CustomerAddress string `json:"customer_address"`
+	CustomerEmail   string `json:"customer_email"`
 }
