@@ -36,4 +36,5 @@ type QueryStringProduct struct {
 	CategoryID int64
 	StartPrice int64
 	EndPrice   int64
+	Status     string
 }

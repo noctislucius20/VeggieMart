@@ -19,7 +19,6 @@ func ParseInt64QueryParam(
 	param string,
 	defaultVal int64,
 ) (int64, error) {
-
 	strVal := c.QueryParam(param)
 
 	if strVal == "" {
@@ -36,4 +35,28 @@ func ParseInt64QueryParam(
 	}
 
 	return val, nil
+}
+
+func RangePriceFormat(priceQuery string) (int64, int64, error) {
+	if priceQuery == "" {
+		return 0, 0, nil
+	}
+
+	priceList := strings.Split(priceQuery, " ")
+
+	startPrice, err := strconv.ParseInt(priceList[0], 10, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	endPrice, err := strconv.ParseInt(priceList[2], 10, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	if startPrice <= 0 || endPrice <= 0 {
+		return 0, 0, nil
+	}
+
+	return startPrice, endPrice, nil
 }

@@ -8,9 +8,11 @@ import (
 	"product-service/internal/adapter/handler/response"
 	"product-service/internal/core/domain/entity"
 	"product-service/internal/core/service"
+	middlewareGateway "product-service/internal/middleware"
 	"product-service/utils"
 	"product-service/utils/conv"
 	"product-service/utils/logger"
+
 	"strconv"
 	"strings"
 	"time"
@@ -48,10 +50,15 @@ func NewProductHandler(e *echo.Echo, cfg *config.Config, service service.Product
 
 	mid := adapter.NewMiddlewareAdapter(cfg, logger.NewLogger().Logger(), jwtService, redisClient)
 
-	// homeProduct := e.Group("/products")
-	e.GET("/products/home", productHandler.GetAllProductsHome)
-	e.GET("/products/shop", productHandler.GetAllProductsShop)
-	e.GET("/products/home/:id", productHandler.GetDetailProductHome)
+	productGroup := e.Group("/products")
+	internalProductGroup := e.Group("/internal/products")
+
+	productGroup.Use(middlewareGateway.GatewayValidationMiddleware(cfg))
+	internalProductGroup.Use(middlewareGateway.InternalServiceMiddleware(cfg))
+
+	productGroup.GET("/home", productHandler.GetAllProductsHome)
+	productGroup.GET("/shop", productHandler.GetAllProductsShop)
+	productGroup.GET("/home/:id", productHandler.GetDetailProductHome)
 
 	adminPermission := []string{
 		"products:read:all",
@@ -68,15 +75,15 @@ func NewProductHandler(e *echo.Echo, cfg *config.Config, service service.Product
 	}
 
 	// adminGroup := e.Group("/admin", mid.CheckToken())
-	e.GET("/products", productHandler.GetAllProductsAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.GET("/products/:id", productHandler.GetProductByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.POST("/products", productHandler.CreateProductAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.DELETE("/products/:id", productHandler.DeleteProductAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.PUT("/products/:id", productHandler.UpdateProductAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	productGroup.GET("", productHandler.GetAllProductsAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	productGroup.GET("/:id", productHandler.GetProductByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	productGroup.POST("", productHandler.CreateProductAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	productGroup.DELETE("/:id", productHandler.DeleteProductAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	productGroup.PUT("/:id", productHandler.UpdateProductAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
 
 	// authGroup := e.Group("auth", mid.CheckToken())
-	e.POST("/products/batch", productHandler.GetBatchProducts, mid.CheckToken(), mid.RequiredPermission(authPermission...))
-	e.POST("/products/stock", productHandler.UpdateStockProduct, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	internalProductGroup.POST("/batch", productHandler.GetBatchProducts, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	internalProductGroup.POST("/stock", productHandler.UpdateStockProduct, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 
 	return productHandler
 }
@@ -160,7 +167,13 @@ func (p *productHandler) GetDetailProductHome(c echo.Context) error {
 	respHomeDetail = response.ProductHomeDetailResponse{
 		ID:           result.ID,
 		ProductName:  result.Name,
+		Weight:       result.Weight,
+		Image:        result.Image,
+		Stock:        result.Stock,
+		RegularPrice: int64(result.RegularPrice),
+		SalePrice:    int64(result.SalePrice),
 		CategoryName: result.CategoryName,
+		CategorySlug: result.CategorySlug,
 		Description:  result.Description,
 		Unit:         result.Unit,
 	}
@@ -187,16 +200,18 @@ func (p *productHandler) GetAllProductsShop(c echo.Context) error {
 	)
 
 	search := c.QueryParam("search")
+	status := "ACTIVE"
+	price := c.QueryParam("price")
 
 	orderBy := "created_at"
 	orderType := "desc"
 	if c.QueryParam("order_by") != "" {
 		switch strings.ToLower(c.QueryParam("order_by")) {
 		case "price_asc":
-			orderBy = "regular_price"
+			orderBy = "sale_price"
 			orderType = "asc"
 		case "price_desc":
-			orderBy = "regular_price"
+			orderBy = "sale_price"
 			orderType = "desc"
 		case "newest":
 			orderBy = "id"
@@ -216,16 +231,16 @@ func (p *productHandler) GetAllProductsShop(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
-	startPrice, err := conv.ParseInt64QueryParam(c, "start_price", 0)
+	categoryId, err := conv.ParseInt64QueryParam(c, "category", 0)
 	if err != nil {
 		c.Logger().Errorf("[ProductHandler-3] GetAllProductsShop: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
-	endPrice, err := conv.ParseInt64QueryParam(c, "end_price", 0)
+	startPrice, endPrice, err := conv.RangePriceFormat(price)
 	if err != nil {
 		c.Logger().Errorf("[ProductHandler-4] GetAllProductsShop: %v", err)
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.PRICE_RANGE_INVALID))
 	}
 
 	if startPrice > 0 && endPrice > 0 && startPrice > endPrice {
@@ -234,6 +249,8 @@ func (p *productHandler) GetAllProductsShop(c echo.Context) error {
 	}
 
 	reqEntity := entity.QueryStringProduct{
+		CategoryID: categoryId,
+		Status:     status,
 		Search:     search,
 		Page:       page,
 		Limit:      limit,
@@ -243,9 +260,9 @@ func (p *productHandler) GetAllProductsShop(c echo.Context) error {
 		EndPrice:   endPrice,
 	}
 
-	results, totalPage, countData, err := p.service.GetAllProducts(ctx, reqEntity)
+	results, countData, totalPage, err := p.service.GetAllProducts(ctx, reqEntity)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-6] GetAllProductsShop: %v", err)
+		c.Logger().Errorf("[ProductHandler-5] GetAllProductsShop: %v", err)
 		switch err.Error() {
 		case utils.RELATION_DATA_NOT_FOUND:
 			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
@@ -284,10 +301,12 @@ func (p *productHandler) GetAllProductsHome(c echo.Context) error {
 
 	orderBy := "created_at"
 	orderType := "desc"
+	status := "ACTIVE"
 	page := int64(1)
 	limit := int64(5)
 
 	reqEntity := entity.QueryStringProduct{
+		Status:    status,
 		Page:      page,
 		Limit:     limit,
 		OrderBy:   orderBy,
@@ -554,24 +573,26 @@ func (p *productHandler) GetProductByIdAdmin(c echo.Context) error {
 				Stock:        child.Stock,
 				RegularPrice: int64(child.RegularPrice),
 				SalePrice:    int64(child.SalePrice),
+				ProductImage: child.Image,
 			})
 		}
 	}
 
 	respProduct = response.ProductDetailResponse{
-		ID:            result.ID,
-		ProductName:   result.Name,
-		ParentID:      result.ParentID,
-		ProductImage:  result.Image,
-		CategoryName:  result.CategoryName,
-		ProductStatus: result.Status,
-		SalePrice:     int64(result.SalePrice),
-		RegularPrice:  int64(result.RegularPrice),
-		CreatedAt:     result.CreatedAt,
-		Unit:          result.Unit,
-		Weight:        result.Weight,
-		Stock:         result.Stock,
-		Childs:        responseChilds,
+		ID:                 result.ID,
+		ProductName:        result.Name,
+		ParentID:           result.ParentID,
+		ProductImage:       result.Image,
+		CategoryName:       result.CategoryName,
+		ProductDescription: result.Description,
+		ProductStatus:      result.Status,
+		SalePrice:          int64(result.SalePrice),
+		RegularPrice:       int64(result.RegularPrice),
+		CreatedAt:          result.CreatedAt,
+		Unit:               result.Unit,
+		Weight:             result.Weight,
+		Stock:              result.Stock,
+		Childs:             responseChilds,
 	}
 
 	return c.JSON(http.StatusOK, response.ResponseSuccess(respProduct))
@@ -640,7 +661,7 @@ func (p *productHandler) GetAllProductsAdmin(c echo.Context) error {
 	}
 
 	search := c.QueryParam("search")
-
+	status := c.QueryParam("status")
 	orderBy := c.QueryParam("order_by")
 	if orderBy == "" {
 		orderBy = "created_at"
@@ -682,6 +703,7 @@ func (p *productHandler) GetAllProductsAdmin(c echo.Context) error {
 	}
 
 	reqEntity := entity.QueryStringProduct{
+		Status:     status,
 		Search:     search,
 		Page:       page,
 		Limit:      limit,
@@ -692,7 +714,7 @@ func (p *productHandler) GetAllProductsAdmin(c echo.Context) error {
 		EndPrice:   endPrice,
 	}
 
-	results, totalPages, countData, err := p.service.GetAllProducts(ctx, reqEntity)
+	results, countData, totalPages, err := p.service.GetAllProducts(ctx, reqEntity)
 	if err != nil {
 		c.Logger().Errorf("[ProductHandler-7] GetAllProductsAdmin: %v", err)
 		switch err.Error() {

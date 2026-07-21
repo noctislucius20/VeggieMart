@@ -50,14 +50,25 @@ type PublisherName struct {
 	OrderStockUnavailable string `json:"order_stock_unavailable"`
 }
 
+type APIGateway struct {
+	RequestAPI string `json:"request_api"`
+	SecretKey  string `json:"secret_key"`
+}
+
+type APIInternalService struct {
+	SecretKey string `json:"secret_key"`
+}
+
 type Config struct {
-	App           App           `json:"app"`
-	Psql          PsqlDB        `json:"psql"`
-	RabbitMQ      RabbitMQ      `json:"rabbitmq"`
-	Storage       Supabase      `json:"storage"`
-	Redis         Redis         `json:"redis"`
-	ElasticSearch ElasticSearch `json:"elasticsearch"`
-	PublisherName PublisherName `json:"publisher_name"`
+	App                App                `json:"app"`
+	Psql               PsqlDB             `json:"psql"`
+	RabbitMQ           RabbitMQ           `json:"rabbitmq"`
+	Storage            Supabase           `json:"storage"`
+	Redis              Redis              `json:"redis"`
+	ElasticSearch      ElasticSearch      `json:"elasticsearch"`
+	PublisherName      PublisherName      `json:"publisher_name"`
+	APIGateway         APIGateway         `json:"api_gateway"`
+	APIInternalService APIInternalService `json:"api_internal_service"`
 }
 
 func NewConfig() *Config {
@@ -104,6 +115,13 @@ func NewConfig() *Config {
 			ProductDelete:         viper.GetString("PRODUCT_DELETE"),
 			ProductUpdate:         viper.GetString("PRODUCT_UPDATE"),
 			OrderStockUnavailable: viper.GetString("ORDER_STOCK_UNAVAILABLE"),
+		},
+		APIGateway: APIGateway{
+			RequestAPI: viper.GetString("GATEWAY_REQUEST_API"),
+			SecretKey:  viper.GetString("GATEWAY_SECRET_KEY"),
+		},
+		APIInternalService: APIInternalService{
+			SecretKey: viper.GetString("INTERNAL_SERVICE_SECRET"),
 		},
 	}
 }

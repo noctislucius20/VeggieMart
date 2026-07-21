@@ -24,9 +24,9 @@ type httpService struct {
 
 // HttpOrderByIdService implements [HttpServiceInterface].
 func (h *httpService) HttpOrderByIdService(orderId int64, jwtUserData entity.JwtUserData, roleName string) (*entity.OrderDetailResponseEntity, error) {
-	baseUrlOrder := fmt.Sprintf("%s%s", h.cfg.App.OrderServiceUrl, "/orders/"+strconv.Itoa(int(orderId))+"/admin")
+	baseUrlOrder := fmt.Sprintf("%s%s", h.cfg.App.OrderServiceUrl, "/internal/orders/"+strconv.Itoa(int(orderId))+"/admin")
 	if strings.ToLower(roleName) == "customer" {
-		baseUrlOrder = fmt.Sprintf("%s%s", h.cfg.App.OrderServiceUrl, "/orders/"+strconv.Itoa(int(orderId)))
+		baseUrlOrder = fmt.Sprintf("%s%s", h.cfg.App.OrderServiceUrl, "/internal/orders/"+strconv.Itoa(int(orderId)))
 	}
 
 	header := map[string]string{

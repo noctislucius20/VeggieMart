@@ -10,6 +10,7 @@ import (
 	"user-service/internal/adapter/handler/response"
 	"user-service/internal/core/domain/entity"
 	"user-service/internal/core/service"
+	middlewareGateway "user-service/internal/middleware"
 	"user-service/utils"
 	"user-service/utils/logger"
 
@@ -48,11 +49,14 @@ func NewRoleHandler(e *echo.Echo, roleService service.RoleServiceInterface, cfg 
 	}
 
 	// adminGroup := e.Group("/admin", mid.CheckToken())
-	e.GET("/roles", roleHandler.GetRolesAllAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.GET("/roles/:id", roleHandler.GetRoleByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.POST("/roles", roleHandler.CreateRoleAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.PUT("/roles/:id", roleHandler.UpdateRoleAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.DELETE("/roles/:id", roleHandler.DeleteRoleAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	userGroup := e.Group("/users")
+	userGroup.Use(middlewareGateway.GatewayValidationMiddleware(cfg))
+
+	userGroup.GET("/roles", roleHandler.GetRolesAllAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	userGroup.GET("/roles/:id", roleHandler.GetRoleByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	userGroup.POST("/roles", roleHandler.CreateRoleAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	userGroup.PUT("/roles/:id", roleHandler.UpdateRoleAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	userGroup.DELETE("/roles/:id", roleHandler.DeleteRoleAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
 
 	return roleHandler
 }

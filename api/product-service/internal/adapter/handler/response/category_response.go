@@ -19,12 +19,14 @@ type CategoryResponse struct {
 }
 
 type CategoryHomeListResponse struct {
+	ID   int64  `json:"id"`
 	Name string `json:"name"`
 	Icon string `json:"icon"`
 	Slug string `json:"slug"`
 }
 
 type CategoryShopListResponse struct {
+	ID     int64                      `json:"id"`
 	Name   string                     `json:"name"`
 	Slug   string                     `json:"slug"`
 	Childs []CategoryShopListResponse `json:"childs"`

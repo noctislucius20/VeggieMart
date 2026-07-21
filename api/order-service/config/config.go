@@ -51,15 +51,28 @@ type PublisherName struct {
 	EmailUpdateOrderStatus string `json:"email_update_order_status"`
 	OrderPaymentSuccess    string `json:"order_payment_success"`
 	OrderUpdateStatus      string `json:"order_update_status"`
+	OrderPaymentCreate     string `json:"order_payment_create"`
+}
+
+type APIGateway struct {
+	RequestAPI string `json:"request_api"`
+	SecretKey  string `json:"secret_key"`
+}
+
+type APIInternalService struct {
+	ServiceName string `json:"service_name"`
+	SecretKey   string `json:"secret_key"`
 }
 
 type Config struct {
-	App           App           `json:"app"`
-	Psql          PsqlDB        `json:"psql"`
-	RabbitMQ      RabbitMQ      `json:"rabbitmq"`
-	Redis         Redis         `json:"redis"`
-	Elasticsearch Elasticsearch `json:"elasticsearch"`
-	PublisherName PublisherName `json:"publisher_name"`
+	App                App                `json:"app"`
+	Psql               PsqlDB             `json:"psql"`
+	RabbitMQ           RabbitMQ           `json:"rabbitmq"`
+	Redis              Redis              `json:"redis"`
+	Elasticsearch      Elasticsearch      `json:"elasticsearch"`
+	PublisherName      PublisherName      `json:"publisher_name"`
+	APIGateway         APIGateway         `json:"api_gateway"`
+	APIInternalService APIInternalService `json:"api_internal_service"`
 }
 
 func NewConfig() *Config {
@@ -109,6 +122,15 @@ func NewConfig() *Config {
 			EmailUpdateOrderStatus: viper.GetString("EMAIL_UPDATE_ORDER_STATUS"),
 			OrderPaymentSuccess:    viper.GetString("ORDER_PAYMENT_SUCCESS"),
 			OrderUpdateStatus:      viper.GetString("ORDER_UPDATE_STATUS"),
+			OrderPaymentCreate:     viper.GetString("ORDER_PAYMENT_CREATE"),
+		},
+		APIGateway: APIGateway{
+			RequestAPI: viper.GetString("GATEWAY_REQUEST_API"),
+			SecretKey:  viper.GetString("GATEWAY_SECRET_KEY"),
+		},
+		APIInternalService: APIInternalService{
+			ServiceName: viper.GetString("INTERNAL_SERVICE_NAME"),
+			SecretKey:   viper.GetString("INTERNAL_SERVICE_SECRET"),
 		},
 	}
 }

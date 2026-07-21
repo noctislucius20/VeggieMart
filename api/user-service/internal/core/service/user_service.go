@@ -23,7 +23,7 @@ type UserServiceInterface interface {
 	ActivateAccount(ctx context.Context, token string) (*entity.UserEntity, error)
 	UpdatePassword(ctx context.Context, req entity.UserEntity) error
 	GetProfileById(ctx context.Context, userId int64) (*entity.UserEntity, error)
-	UpdateProfile(ctx context.Context, req entity.UserEntity) error
+	UpdateProfile(ctx context.Context, req entity.UserEntity) (string, string, error)
 
 	// Admin customer management functions can be added here
 	GetBatchCustomers(ctx context.Context, userIds []int64) ([]entity.UserEntity, error)
@@ -190,7 +190,7 @@ func (u *userService) CreateCustomer(ctx context.Context, req entity.UserEntity)
 			"receiver_email":    req.Email,
 			"message":           payloadMessage,
 			"subject":           "Verify Your Account",
-			"receiver_id":       customerId,
+			"receiver_id":       customerIdCreated,
 			"notification_type": "EMAIL",
 		}
 
@@ -262,19 +262,20 @@ func (u *userService) GetCustomersAll(ctx context.Context, query entity.QueryStr
 }
 
 // UpdateProfile implements UserServiceInterface.
-func (u *userService) UpdateProfile(ctx context.Context, req entity.UserEntity) error {
+func (u *userService) UpdateProfile(ctx context.Context, req entity.UserEntity) (string, string, error) {
+	var (
+		token    string
+		roleName string
+	)
+
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
 		if err := u.repo.UpdateProfile(txCtx, req); err != nil {
 			return err
 		}
 
-		roleEntity, err := u.roleService.GetRoleByIdAdmin(txCtx, req.RoleID)
+		profile, err := u.cacheUser.GetProfileById(txCtx, req.ID)
 		if err != nil {
 			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
-			return err
-		}
-
-		if err := u.cacheUser.DeleteUserCache(txCtx, req.ID); err != nil {
 			return err
 		}
 
@@ -290,20 +291,27 @@ func (u *userService) UpdateProfile(ctx context.Context, req entity.UserEntity) 
 			LoggedIn:  true,
 			CreatedAt: time.Now().String(),
 			Token:     tokenString,
-			RoleID:    roleEntity.ID,
+			RoleID:    profile.RoleID,
+		}
+
+		if err := u.cacheUser.DeleteUserCache(txCtx, req.ID); err != nil {
+			return err
 		}
 
 		if err := u.cacheUser.SetUserSession(txCtx, session); err != nil {
 			return err
 		}
 
+		token = tokenString
+		roleName = profile.RoleName
+
 		return nil
 	}); err != nil {
 		u.logger.Errorf("[UserService-1] UpdateProfile: %v", err)
-		return err
+		return "", "", err
 	}
 
-	return nil
+	return token, roleName, nil
 }
 
 // GetProfileById implements UserServiceInterface.
@@ -578,6 +586,9 @@ func (u *userService) SignIn(ctx context.Context, req entity.UserEntity) (*entit
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
 		userEntity, err := u.cacheUser.GetUserByEmail(txCtx, req.Email)
 		if err != nil {
+			if err.Error() == utils.DATA_NOT_FOUND {
+				err = errors.New(utils.LOGIN_INVALID)
+			}
 			return err
 		}
 

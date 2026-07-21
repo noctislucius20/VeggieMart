@@ -9,6 +9,7 @@ import (
 	"payment-service/internal/adapter/handler/response"
 	"payment-service/internal/core/domain/entity"
 	"payment-service/internal/core/service"
+	middlewareGateway "payment-service/internal/middleware"
 	"payment-service/utils"
 	"payment-service/utils/conv"
 	"payment-service/utils/logger"
@@ -25,6 +26,7 @@ type PaymentHandlerInterface interface {
 	CreatePayment(c echo.Context) error
 	GetAllPayments(c echo.Context) error
 	GetPaymentById(c echo.Context) error
+	GetPaymentByOrderId(c echo.Context) error
 
 	MidtransWebhook(c echo.Context) error
 
@@ -48,7 +50,10 @@ func NewPaymentHandler(paymentService service.PaymentServiceInterface, e *echo.E
 
 	mid := adapter.NewMiddlewareAdapter(cfg, jwtService, redisClient, logger.NewLogger().Logger())
 
-	e.POST("/payments/webhook", paymentHandler.MidtransWebhook)
+	paymentGroup := e.Group("/payments")
+	paymentGroup.Use(middlewareGateway.GatewayValidationMiddleware(cfg))
+
+	paymentGroup.POST("/webhook", paymentHandler.MidtransWebhook)
 
 	authPermission := []string{
 		"payments:read:own",
@@ -65,13 +70,15 @@ func NewPaymentHandler(paymentService service.PaymentServiceInterface, e *echo.E
 	}
 
 	// authGroup := e.Group("/auth", mid.CheckToken())
-	e.POST("/payments", paymentHandler.CreatePayment, mid.CheckToken(), mid.RequiredPermission(authPermission...))
-	e.GET("/payments", paymentHandler.GetAllPayments, mid.CheckToken(), mid.RequiredPermission(authPermission...))
-	e.GET("/payments/:id", paymentHandler.GetPaymentById, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	paymentGroup.POST("", paymentHandler.CreatePayment, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	paymentGroup.GET("", paymentHandler.GetAllPayments, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	paymentGroup.GET("/order/:order_id", paymentHandler.GetPaymentByOrderId, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	paymentGroup.GET("/:id", paymentHandler.GetPaymentById, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 
 	// adminGroup := e.Group("/admin", mid.CheckToken())
-	e.GET("/payments/admin", paymentHandler.GetAllPaymentsAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.GET("/payments/:id/admin", paymentHandler.GetPaymentByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	paymentGroup.GET("/admin", paymentHandler.GetAllPaymentsAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	paymentGroup.GET("/order/:order_id/admin", paymentHandler.GetPaymentByOrderId, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	paymentGroup.GET("/:id/admin", paymentHandler.GetPaymentByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
 
 	return paymentHandler
 }
@@ -186,6 +193,67 @@ func (p *paymentHandler) GetPaymentByIdAdmin(c echo.Context) error {
 		PaymentAt:       result.PaymentAt,
 		OrderCode:       result.Order.OrderCode,
 		ShippingType:    result.Order.ShippingType,
+		OrderAt:         result.Order.OrderDatetime,
+		OrderRemarks:    result.Order.Remarks,
+		CustomerName:    result.Customer.CustomerName,
+		CustomerEmail:   result.Customer.CustomerEmail,
+		CustomerAddress: result.Customer.CustomerAddress,
+	}
+
+	return c.JSON(http.StatusOK, response.ResponseSuccess(respPayment))
+}
+
+// GetPaymentByOrderId implements [PaymentHandlerInterface].
+func (p *paymentHandler) GetPaymentByOrderId(c echo.Context) error {
+	var (
+		ctx         = c.Request().Context()
+		respPayment = response.PaymentDetailResponse{}
+		jwtUserData = entity.JwtUserData{}
+	)
+
+	user := c.Get("user").(string)
+	if user == "" {
+		c.Logger().Errorf("[PaymentHandler-1] GetPaymentByOrderId: %v", "data token not found")
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	}
+
+	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
+		c.Logger().Errorf("[PaymentHandler-2] GetPaymentByOrderId: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+	}
+
+	orderIdParam := c.Param("order_id")
+	if orderIdParam == "" {
+		c.Logger().Errorf("[PaymentHandler-3] GetPaymentByOrderId: %v", "order_id required")
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
+	}
+
+	orderId, err := strconv.ParseInt(orderIdParam, 10, 64)
+	if err != nil {
+		c.Logger().Errorf("[PaymentHandler-4] GetPaymentByOrderId: %v", "order_id invalid")
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
+	}
+
+	result, err := p.paymentService.GetPaymentByOrderId(ctx, orderId, jwtUserData, user)
+	if err != nil {
+		c.Logger().Errorf("[PaymentHandler-5] GetPaymentByOrderId: %v", err)
+		switch err.Error() {
+		case utils.DATA_NOT_FOUND:
+			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
+		default:
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		}
+	}
+
+	respPayment = response.PaymentDetailResponse{
+		ID:              int64(result.ID),
+		OrderCode:       result.Order.OrderCode,
+		PaymentMethod:   result.PaymentMethod,
+		PaymentStatus:   result.PaymentStatus,
+		PaymentToken:    result.PaymentGatewayID,
+		GrossAmount:     result.GrossAmount,
+		ShippingType:    result.Order.ShippingType,
+		PaymentAt:       result.PaymentAt,
 		OrderAt:         result.Order.OrderDatetime,
 		OrderRemarks:    result.Order.Remarks,
 		CustomerName:    result.Customer.CustomerName,
@@ -421,7 +489,6 @@ func (p *paymentHandler) CreatePayment(c echo.Context) error {
 
 	reqEntity := entity.PaymentEntity{
 		PaymentMethod: req.PaymentMethod,
-		GrossAmount:   req.GrassAmount,
 		UserID:        jwtUserData.UserID,
 		Remarks:       req.Remarks,
 		Order: entity.OrderEntity{
@@ -443,7 +510,6 @@ func (p *paymentHandler) CreatePayment(c echo.Context) error {
 	}
 
 	respPayment := map[string]any{
-		"payment_id":    result.ID,
 		"payment_token": result.PaymentGatewayID,
 	}
 

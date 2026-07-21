@@ -2,11 +2,9 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"notification-service/internal/adapter/repository"
 	"notification-service/internal/core/domain/entity"
 	"notification-service/internal/core/service/transaction"
-	"notification-service/utils"
 
 	"github.com/labstack/gommon/log"
 	"gorm.io/gorm"
@@ -14,8 +12,9 @@ import (
 
 type NotificationServiceInterface interface {
 	GetAllNotifications(ctx context.Context, query entity.NotificationQueryString) ([]entity.NotificationEntity, int64, int64, error)
+	GetAllPushNotification(ctx context.Context, query entity.NotificationQueryString) ([]entity.NotificationEntity, int64, int64, error)
 	GetNotificationById(ctx context.Context, notificationId int64) (*entity.NotificationEntity, error)
-	SendPushNotification(ctx context.Context, notification entity.NotificationEntity)
+	MarkAsSentNotification(ctx context.Context, notificationId int64) error
 	MarkAsReadNotification(ctx context.Context, notificationId int64) error
 }
 
@@ -37,6 +36,39 @@ func NewNotificationService(repo repository.NotificationRepositoryInterface, txM
 
 // TODO add cache notification
 
+// GetAllPushNotification implements [NotificationServiceInterface].
+func (n *notificationService) GetAllPushNotification(ctx context.Context, query entity.NotificationQueryString) ([]entity.NotificationEntity, int64, int64, error) {
+	var (
+		notifications []entity.NotificationEntity
+		countData     int64
+		totalPages    int64
+	)
+
+	if err := n.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		notificationEntities, count, pages, err := n.repo.GetAllPushNotification(txCtx, query)
+		if err != nil {
+			return nil
+		}
+
+		if len(notificationEntities) == 0 {
+			return nil
+		}
+
+		if err := n.repo.MarkAllAsSentNotification(txCtx, query.UserID); err != nil {
+			return err
+		}
+
+		notifications, countData, totalPages = notificationEntities, count, pages
+
+		return nil
+	}); err != nil {
+		n.logger.Errorf("[NotificationService-1] GetAllPushNotification: %v", err)
+		return nil, 0, 0, err
+	}
+
+	return notifications, countData, totalPages, nil
+}
+
 // MarkAsReadNotification implements [NotificationServiceInterface].
 func (n *notificationService) MarkAsReadNotification(ctx context.Context, notificationId int64) error {
 	if err := n.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
@@ -57,43 +89,20 @@ func (n *notificationService) MarkAsReadNotification(ctx context.Context, notifi
 	return nil
 }
 
-// SendPushNotification implements [NotificationServiceInterface].
-func (n *notificationService) SendPushNotification(ctx context.Context, notification entity.NotificationEntity) {
-	if notification.ReceiverID == nil {
-		return
-	}
-
+// MarkAsSentNotification implements [NotificationServiceInterface].
+func (n *notificationService) MarkAsSentNotification(ctx context.Context, notificationId int64) error {
 	if err := n.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		conn := utils.GetWebSocketConn(*notification.ReceiverID)
-		if conn == nil {
-			err := fmt.Errorf("%v, ID = %d", utils.DATA_NOT_FOUND, *notification.ReceiverID)
-			return err
-		}
-
-		msg := map[string]any{
-			"type":    notification.NotificationType,
-			"subject": notification.Subject,
-			"message": notification.Message,
-			"sent_at": notification.SentAt,
-		}
-
-		if err := conn.WriteJSON(msg); err != nil {
-			return err
-		}
-
-		if _, err := n.repo.GetNotificationById(txCtx, notification.ID); err != nil {
-			return err
-		}
-
-		if err := n.repo.MarkAsSentNotification(txCtx, notification.ID); err != nil {
+		if err := n.repo.MarkAsSentNotification(txCtx, notificationId); err != nil {
 			return err
 		}
 
 		return nil
 	}); err != nil {
-		n.logger.Errorf("[NotificationService-2] SendPushNotification: %v", err)
-		return
+		n.logger.Errorf("[NotificationService-1] MarkAsSentNotification: %v", err)
+		return err
 	}
+
+	return nil
 }
 
 // GetNotificationById implements [NotificationServiceInterface].
@@ -126,6 +135,10 @@ func (n *notificationService) GetAllNotifications(ctx context.Context, query ent
 	)
 
 	if err := n.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if err := n.repo.MarkAllAsSentNotification(txCtx, query.UserID); err != nil {
+			return err
+		}
+
 		notificationEntities, count, pages, err := n.repo.GetAllNotifications(txCtx, query)
 		if err != nil {
 			return nil

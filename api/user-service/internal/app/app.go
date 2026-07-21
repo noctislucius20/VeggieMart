@@ -41,7 +41,6 @@ func RunServer() {
 
 	e := echo.New()
 
-	e.Use(middleware.CORS())
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
 		LogURI:        true,
 		LogMethod:     true,

@@ -1,12 +1,13 @@
 package response
 
 type OrderListResponse struct {
-	ID           int64  `json:"id"`
-	OrderCode    string `json:"order_code"`
-	ProductImage string `json:"product_image"`
-	CustomerName string `json:"customer_name"`
-	Status       string `json:"status"`
-	TotalAmount  int64  `json:"total_amount"`
+	ID            int64  `json:"id"`
+	OrderCode     string `json:"order_code"`
+	OrderDatetime string `json:"order_datetime"`
+	ProductImage  string `json:"product_image"`
+	CustomerName  string `json:"customer_name"`
+	Status        string `json:"status"`
+	TotalAmount   int64  `json:"total_amount"`
 }
 
 type OrderDetailResponse struct {
@@ -38,13 +39,14 @@ type OrderItemsDetail struct {
 }
 
 type OrderCustomerList struct {
-	ID            int64  `json:"id"`
-	OrderCode     string `json:"order_code"`
-	ProductImage  string `json:"product_image"`
-	ProductName   string `json:"product_name"`
-	Status        string `json:"status"`
-	TotalAmount   int64  `json:"total_amount"`
-	OrderDatetime string `json:"order_datetime"`
+	ID                 int64  `json:"id"`
+	OrderCode          string `json:"order_code"`
+	ProductImage       string `json:"product_image"`
+	ProductName        string `json:"product_name"`
+	OrderItemsQuantity int64  `json:"quantity"`
+	Status             string `json:"status"`
+	TotalAmount        int64  `json:"total_amount"`
+	OrderDatetime      string `json:"order_datetime"`
 }
 
 type OrderBatchResponse struct {

@@ -8,6 +8,7 @@ import (
 	"product-service/internal/adapter/handler/response"
 	"product-service/internal/core/domain/entity"
 	"product-service/internal/core/service"
+	middlewareGateway "product-service/internal/middleware"
 	"product-service/utils"
 	"product-service/utils/conv"
 	"product-service/utils/logger"
@@ -40,14 +41,16 @@ func NewCategoryHandler(e *echo.Echo, categoryService service.CategoryServiceInt
 
 	e.Use(middleware.Recover())
 	e.Use(middleware.ContextTimeoutWithConfig(middleware.ContextTimeoutConfig{
-		Timeout: 10 * time.Second,
+		Timeout: 100 * time.Second,
 	}))
 
 	mid := adapter.NewMiddlewareAdapter(cfg, logger.NewLogger().Logger(), jwtService, redisClient)
 
-	// categoryGroup := e.Group("/categories")
-	e.GET("/categories/shop", categoryHandler.GetAllCategoriesShop)
-	e.GET("/categories/home", categoryHandler.GetAllCategoriesHome)
+	productGroup := e.Group("/products")
+	productGroup.Use(middlewareGateway.GatewayValidationMiddleware(cfg))
+
+	productGroup.GET("/categories/shop", categoryHandler.GetAllCategoriesShop)
+	productGroup.GET("/categories/home", categoryHandler.GetAllCategoriesHome)
 
 	adminPermission := []string{
 		"categories:read:all",
@@ -57,12 +60,12 @@ func NewCategoryHandler(e *echo.Echo, categoryService service.CategoryServiceInt
 	}
 
 	// adminGroup := e.Group("/admin", mid.CheckToken())
-	e.POST("/categories", categoryHandler.CreateCategoryAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.GET("/categories", categoryHandler.GetAllCategoriesAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.GET("/categories/:id", categoryHandler.GetCategoryByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.GET("/categories/:slug/slug", categoryHandler.GetCategoryBySlugAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.PUT("/categories/:id", categoryHandler.UpdateCategoryAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.DELETE("/categories/:id", categoryHandler.DeleteCategoryAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	productGroup.POST("/categories", categoryHandler.CreateCategoryAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	productGroup.GET("/categories", categoryHandler.GetAllCategoriesAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	productGroup.GET("/categories/:id", categoryHandler.GetCategoryByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	productGroup.GET("/categories/:slug/slug", categoryHandler.GetCategoryBySlugAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	productGroup.PUT("/categories/:id", categoryHandler.UpdateCategoryAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	productGroup.DELETE("/categories/:id", categoryHandler.DeleteCategoryAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
 
 	return categoryHandler
 }
@@ -88,6 +91,7 @@ func (ch *categoryHandler) GetAllCategoriesShop(c echo.Context) error {
 		// Otherwise, it will categorized as a child.
 		if result.ParentID == nil {
 			respCategoriesShopList = append(respCategoriesShopList, response.CategoryShopListResponse{
+				ID:   result.ID,
 				Name: result.Name,
 				Slug: result.Slug,
 			})
@@ -96,6 +100,7 @@ func (ch *categoryHandler) GetAllCategoriesShop(c echo.Context) error {
 
 		// Add childs category to their parent.
 		respCategoriesShopList[len(respCategoriesShopList)-1].Childs = append(respCategoriesShopList[len(respCategoriesShopList)-1].Childs, response.CategoryShopListResponse{
+			ID:   result.ID,
 			Name: result.Name,
 			Slug: result.Slug,
 		})
@@ -123,6 +128,7 @@ func (ch *categoryHandler) GetAllCategoriesHome(c echo.Context) error {
 	for _, result := range results {
 		if result.ParentID == nil {
 			respCategoriesHomeList = append(respCategoriesHomeList, response.CategoryHomeListResponse{
+				ID:   result.ID,
 				Name: result.Name,
 				Icon: result.Icon,
 				Slug: result.Slug,
@@ -394,7 +400,7 @@ func (ch *categoryHandler) GetAllCategoriesAdmin(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
-	limit, err := conv.ParseInt64QueryParam(c, "limit", 10)
+	limit, err := conv.ParseInt64QueryParam(c, "limit", 5)
 	if err != nil {
 		c.Logger().Errorf("[CategoryHandler-3] GetAllCategoriesAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))

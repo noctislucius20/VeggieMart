@@ -1,8 +1,7 @@
 package request
 
 type PaymentRequest struct {
-	OrderID       int64   `json:"order_id" validate:"required"`
-	PaymentMethod string  `json:"payment_method" validate:"required"`
-	GrassAmount   float64 `json:"gross_amount" validate:"required"`
-	Remarks       string  `json:"remarks"`
+	OrderID       int64  `json:"order_id" validate:"required,gte=1"`
+	PaymentMethod string `json:"payment_method" validate:"required,oneof=COD TRANSFER,max=50"`
+	Remarks       string `json:"remarks" validate:"omitempty"`
 }

@@ -198,19 +198,18 @@ func (o *orderService) UpdateOrderStatus(ctx context.Context, req entity.OrderEn
 // CreateOrder implements [OrderServiceInterface].
 func (o *orderService) CreateOrder(ctx context.Context, req entity.OrderEntity, userData string) (int64, string, error) {
 	var (
-		publishOrderCreate  = o.cfg.PublisherName.OrderCreate
-		outboxEventEntities []entity.OutboxEventEntity
-		orderId             int64
-		wg                  sync.WaitGroup
-		errCh               = make(chan error, 1)
+		publishOrderCreate        = o.cfg.PublisherName.OrderCreate
+		publishOrderPaymentCreate = o.cfg.PublisherName.OrderPaymentCreate
+		outboxEventEntities       []entity.OutboxEventEntity
+		orderId                   int64
+		wg                        sync.WaitGroup
+		errCh                     = make(chan error, 1)
 	)
 
 	req.OrderCode = conv.GenerateOrderCode()
-	shippingFee := 0
 	if strings.ToLower(req.ShippingType) == "delivery" {
-		shippingFee = 5000
+		req.ShippingFee = 5000
 	}
-	req.ShippingFee = int64(shippingFee)
 	req.Status = "PENDING"
 
 	if err := o.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
@@ -235,6 +234,11 @@ func (o *orderService) CreateOrder(ctx context.Context, req entity.OrderEntity, 
 			}
 		}
 
+		for _, v := range req.OrderItems {
+			req.TotalAmount += v.Price * v.Quantity
+		}
+		req.TotalAmount += req.ShippingFee
+
 		orderIdCreated, err := o.repo.CreateOrder(txCtx, req)
 		if err != nil {
 			return err
@@ -251,10 +255,20 @@ func (o *orderService) CreateOrder(ctx context.Context, req entity.OrderEntity, 
 			return err
 		}
 
+		orderEntity.PaymentMethod = req.PaymentMethod
+
 		jsonOrderCreate, _ := json.Marshal(orderEntity)
 
+		// consumed by elastic
 		outboxEventEntities = append(outboxEventEntities, entity.OutboxEventEntity{
 			EventType:   publishOrderCreate,
+			Payload:     string(jsonOrderCreate),
+			AggregateID: fmt.Sprintf("%d", orderIdCreated),
+		})
+
+		// consumed by payment service db
+		outboxEventEntities = append(outboxEventEntities, entity.OutboxEventEntity{
+			EventType:   publishOrderPaymentCreate,
 			Payload:     string(jsonOrderCreate),
 			AggregateID: fmt.Sprintf("%d", orderIdCreated),
 		})

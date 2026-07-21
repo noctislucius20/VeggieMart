@@ -45,6 +45,7 @@ services:
       - redis-net
       - rabbitmq-net
       - elasticsearch-net
+      - api-gateway-net
   
   user-publisher-worker:
     build: 
@@ -114,6 +115,7 @@ services:
       - redis-net
       - rabbitmq-net
       - elasticsearch-net
+      - api-gateway-net
 
   product-publisher-worker:
     build: 
@@ -210,6 +212,7 @@ services:
       - redis-net
       - rabbitmq-net
       - elasticsearch-net
+      - api-gateway-net
 
   order-publisher-worker:
     build: 
@@ -316,6 +319,7 @@ services:
       - redis-net
       - rabbitmq-net
       - elasticsearch-net
+      - api-gateway-net
   
   payment-publisher-worker:
     build: 
@@ -391,6 +395,7 @@ services:
       - redis-net
       - rabbitmq-net
       - elasticsearch-net
+      - api-gateway-net
   
   notification-consumer-worker:
     build: 
@@ -414,6 +419,32 @@ services:
       - redis-net
       - rabbitmq-net
       - elasticsearch-net
+
+  api-gateway-service:
+    build: 
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    env_file:
+      - ./notification-service/.env
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    depends_on:
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - redis-net
+      - api-gateway-net
 
   redis:
     image: redis:8.4
@@ -481,3 +512,5 @@ networks:
   redis-net:
   rabbitmq-net:
   elasticsearch-net:
+  api-gateway-net:
+

@@ -10,6 +10,7 @@ import (
 	"payment-service/internal/adapter/repository"
 	"payment-service/internal/adapter/repository/cache"
 	"payment-service/internal/core/service"
+
 	"payment-service/utils/logger"
 	"payment-service/utils/validator"
 	"syscall"
@@ -41,7 +42,6 @@ func RunServer() {
 
 	e := echo.New()
 
-	e.Use(middleware.CORS())
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
 		LogURI:        true,
 		LogMethod:     true,

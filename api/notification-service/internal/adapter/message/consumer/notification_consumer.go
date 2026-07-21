@@ -9,7 +9,9 @@ import (
 	"notification-service/internal/core/service"
 	"notification-service/internal/core/service/transaction"
 	"notification-service/utils"
+	"notification-service/utils/ws"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/labstack/gommon/log"
 	"github.com/rabbitmq/amqp091-go"
 	"gorm.io/gorm"
@@ -28,10 +30,11 @@ type notificationConsumerWorker struct {
 	txManager           transaction.TransactionManager
 	serviceNotification service.NotificationServiceInterface
 	db                  *gorm.DB
+	redisClient         *redis.Client
 	logger              *log.Logger
 }
 
-func NewNotificationConsumerWorker(emailService message.EmailMessageInterface, repoNotification repository.NotificationRepositoryInterface, txManager transaction.TransactionManager, serviceNotification service.NotificationServiceInterface, conn *amqp091.Connection, db *gorm.DB, logger *log.Logger) NotificationConsumerWorkerInterface {
+func NewNotificationConsumerWorker(emailService message.EmailMessageInterface, repoNotification repository.NotificationRepositoryInterface, txManager transaction.TransactionManager, serviceNotification service.NotificationServiceInterface, conn *amqp091.Connection, db *gorm.DB, redisClient *redis.Client, logger *log.Logger) NotificationConsumerWorkerInterface {
 	return &notificationConsumerWorker{
 		emailService:        emailService,
 		repoNotification:    repoNotification,
@@ -39,6 +42,7 @@ func NewNotificationConsumerWorker(emailService message.EmailMessageInterface, r
 		serviceNotification: serviceNotification,
 		conn:                conn,
 		db:                  db,
+		redisClient:         redisClient,
 		logger:              logger,
 	}
 }
@@ -52,10 +56,25 @@ func (n *notificationConsumerWorker) sendNotification(ctx context.Context, notif
 			return
 		}
 	case "PUSH":
-		n.serviceNotification.SendPushNotification(ctx, notification)
-		return
+		if notification.ReceiverID == nil {
+			n.logger.Errorf("[NotificationConsumer-2] sendNotification: receiver_id is nil")
+			return
+		}
+
+		wsMsg := entity.WsRedisEntity{
+			ID:         notification.ID,
+			ReceiverID: *notification.ReceiverID,
+			Type:       notification.NotificationType,
+			Subject:    *notification.Subject,
+			Message:    notification.Message,
+		}
+
+		if err := ws.PublishWebSocketMessage(ctx, n.redisClient, wsMsg, n.logger); err != nil {
+			n.logger.Errorf("[NotificationConsumer-3] sendNotification: failed to publish to Redis: %v", err)
+			return
+		}
 	default:
-		n.logger.Errorf("[NotificationConsumer-2] sendNotification: %v", utils.INVALID_NOTIFICATION_TYPE)
+		n.logger.Errorf("[NotificationConsumer-4] sendNotification: %v", utils.INVALID_NOTIFICATION_TYPE)
 		return
 	}
 }
@@ -106,9 +125,12 @@ func (n *notificationConsumerWorker) StartCreateNotificationWorker(ctx context.C
 			}
 
 			if err := n.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-				if err := n.repoNotification.CreateNotification(txCtx, notification); err != nil {
+				notificationId, err := n.repoNotification.CreateNotification(txCtx, notification)
+				if err != nil {
 					return err
 				}
+
+				notification.ID = notificationId
 
 				return nil
 			}); err != nil {

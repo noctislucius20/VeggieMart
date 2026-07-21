@@ -204,8 +204,15 @@ func (o *orderRepository) GetAllOrders(ctx context.Context, query entity.OrderQu
 		}).
 		Preload("ProductSnapshots", func(db *gorm.DB) *gorm.DB {
 			return db.Omit("created_at", "last_used", "regular_price")
-		}).
-		Where("order_code ILIKE ? OR status ILIKE ?", "%"+query.Search+"%", "%"+query.Status+"%")
+		})
+
+	if query.Search != "" {
+		sqlMain = sqlMain.Where(`order_code ILIKE ?`, "%"+query.Search+"%")
+	}
+
+	if query.Status != "" {
+		sqlMain = sqlMain.Where("status = ?", query.Status)
+	}
 
 	if query.BuyerID != 0 {
 		sqlMain = sqlMain.Where("buyer_id = ?", query.BuyerID)

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math"
 	"product-service/internal/core/domain/entity"
+	"product-service/utils"
+	"strconv"
 	"strings"
 
 	"github.com/elastic/go-elasticsearch/v7"
@@ -39,8 +41,13 @@ func (e *elasticRepository) SearchProductElastic(ctx context.Context, query enti
 	sortQuery := fmt.Sprintf(`{ "%s": "%s" }`, sortField, sortOrder)
 
 	categoryFilter := ""
-	if query.CategoryID != 0 {
+	if query.CategoryID > 0 {
 		categoryFilter = fmt.Sprintf(`{ "match": { "category_id": "%d" } },`, query.CategoryID)
+	}
+
+	statusFilter := ""
+	if query.Status != "" {
+		statusFilter = fmt.Sprintf(`{ "match": { "status": "%s" } },`, query.Status)
 	}
 
 	priceFilter := ""
@@ -50,7 +57,7 @@ func (e *elasticRepository) SearchProductElastic(ctx context.Context, query enti
 
 	searchFilter := `{ "match_all": {} }`
 	if query.Search != "" {
-		searchFilter = fmt.Sprintf(`{ "multi_match": { "query": "%s", "fields": ["name", "description"] } }`, query.Search)
+		searchFilter = fmt.Sprintf(`{ "multi_match": { "query": "%s", "fields": ["name", "description"], "type": "phrase_prefix" } }`, query.Search)
 	}
 
 	mainQuery := fmt.Sprintf(`{
@@ -59,6 +66,7 @@ func (e *elasticRepository) SearchProductElastic(ctx context.Context, query enti
 		"query": {
 			"bool": {
 				"must": [
+					%s
 					%s
 					%s
 				],
@@ -70,7 +78,7 @@ func (e *elasticRepository) SearchProductElastic(ctx context.Context, query enti
 		"sort": [
 			%s
 		]
-	}`, offset, query.Limit, categoryFilter, searchFilter, priceFilter, sortQuery)
+	}`, offset, query.Limit, categoryFilter, statusFilter, searchFilter, priceFilter, sortQuery)
 
 	res, err := e.esClient.Search(
 		e.esClient.Search.WithContext(ctx),
@@ -79,26 +87,32 @@ func (e *elasticRepository) SearchProductElastic(ctx context.Context, query enti
 		e.esClient.Search.WithPretty(),
 	)
 	if err != nil {
-		e.logger.Errorf("[ProductRepository-1] SearchProducts: %v", err)
+		e.logger.Errorf("[ElasticRepository-1] SearchProductElastic: %v", err)
 		return nil, 0, 0, err
 	}
 	defer res.Body.Close()
 
-	if res.StatusCode != 200 {
-		err := errors.New(res.Status())
-		e.logger.Errorf("[ProductRepository-2] SearchProducts: %v", err)
+	if res.IsError() {
+		err := errors.New(strconv.Itoa(res.StatusCode))
+		e.logger.Errorf("[ElasticRepository-2] SearchProductElastic: %v", err)
 		return nil, 0, 0, err
 	}
 
 	var result map[string]any
 	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
-		e.logger.Errorf("[ProductRepository-3] SearchProducts: %v", err)
+		e.logger.Errorf("[ElasticRepository-3] SearchProductElastic: %v", err)
 		return nil, 0, 0, err
 	}
 
 	totalData := int64(0)
 	if hitsTotal, found := result["hits"].(map[string]any)["total"].(map[string]any); found {
 		totalData = int64(hitsTotal["value"].(float64))
+	}
+
+	if totalData <= 0 {
+		err := errors.New(utils.DATA_NOT_FOUND)
+		e.logger.Errorf("[ElasticRepository-4] SearchProductElastic: %v", err)
+		return nil, 0, 0, err
 	}
 
 	totalPage := int64(0)

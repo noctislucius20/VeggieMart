@@ -12,6 +12,7 @@ type CartServiceInterface interface {
 	AddToCart(ctx context.Context, userId int64, req entity.CartItem) error
 	GetCart(ctx context.Context, userId int64) ([]entity.CartItem, error)
 	RemoveFromCart(ctx context.Context, userId int64, productId int64) error
+	RemoveAllFromCart(ctx context.Context, userId int64) error
 }
 
 type cartService struct {
@@ -76,4 +77,9 @@ func (c *cartService) GetCart(ctx context.Context, userId int64) ([]entity.CartI
 // RemoveFromCart implements [CartServiceInterface].
 func (c *cartService) RemoveFromCart(ctx context.Context, userId int64, productId int64) error {
 	return c.cartRepo.RemoveFromCart(ctx, userId, productId)
+}
+
+// RemoveAllFromCart implements [CartServiceInterface].
+func (c *cartService) RemoveAllFromCart(ctx context.Context, userId int64) error {
+	return c.cartRepo.RemoveAllFromCart(ctx, userId)
 }

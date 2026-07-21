@@ -1,0 +1,32 @@
+package middleware
+
+import (
+	"net/http"
+	"order-service/config"
+	"order-service/internal/adapter/handler/response"
+	"order-service/utils"
+	"order-service/utils/helper"
+
+	"github.com/labstack/echo/v4"
+)
+
+func InternalServiceMiddleware(cfg *config.Config) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			serviceName := c.Request().Header.Get("X-Service-Name")
+			serviceSecret := c.Request().Header.Get("X-Service-Secret")
+
+			if !helper.IsServiceAllowed(serviceName) {
+				return c.JSON(http.StatusForbidden, response.ResponseFailed(utils.SERVICE_NOT_ALLOWED))
+			}
+
+			if serviceSecret != cfg.APIInternalService.SecretKey {
+				return c.JSON(http.StatusForbidden, response.ResponseFailed(utils.SERVICE_SECRET_INVALID))
+			}
+
+			c.Logger().Infof("request from internal service: %s", serviceName)
+
+			return next(c)
+		}
+	}
+}

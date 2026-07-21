@@ -11,6 +11,7 @@ import (
 	"user-service/internal/adapter/handler/response"
 	"user-service/internal/core/domain/entity"
 	"user-service/internal/core/service"
+	middlewareGateway "user-service/internal/middleware"
 	"user-service/utils"
 	"user-service/utils/conv"
 	"user-service/utils/logger"
@@ -54,6 +55,11 @@ func NewUserHandler(e *echo.Echo, userService service.UserServiceInterface, cfg 
 	mid := adapter.NewMiddlewareAdapter(cfg, logger.NewLogger().Logger(), jwtService, redisClient)
 
 	userGroup := e.Group("/users")
+	internalUserGroup := e.Group("/internal/users")
+
+	userGroup.Use(middlewareGateway.GatewayValidationMiddleware(cfg))
+	internalUserGroup.Use(middlewareGateway.InternalServiceMiddleware(cfg))
+
 	userGroup.POST("/signin", userHandler.SignIn)
 	userGroup.POST("/signup", userHandler.CreateUserAccount)
 	userGroup.POST("/forgot-password", userHandler.ForgotPassword)
@@ -85,6 +91,8 @@ func NewUserHandler(e *echo.Echo, userService service.UserServiceInterface, cfg 
 	// authGroup := e.Group("/auth", mid.CheckToken())
 	userGroup.GET("/profile", userHandler.GetProfileById, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 	userGroup.PUT("/profile", userHandler.UpdateProfile, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+
+	internalUserGroup.GET("/profile", userHandler.GetProfileById, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 
 	return userHandler
 }
@@ -222,7 +230,7 @@ func (u *userHandler) UpdateCustomerAdmin(c echo.Context) error {
 		Lat:      latString,
 		Lng:      lngString,
 		Photo:    req.Photo,
-		RoleID:   req.RoleID,
+		RoleID:   2,
 	}
 
 	if err := u.userService.UpdateCustomer(ctx, reqEntity); err != nil {
@@ -270,7 +278,7 @@ func (u *userHandler) CreateCustomerAdmin(c echo.Context) error {
 		Name:     req.Name,
 		Email:    req.Email,
 		Password: req.Password,
-		RoleID:   req.RoleID,
+		RoleID:   2,
 		Address:  req.Address,
 		Lat:      latString,
 		Lng:      lngString,
@@ -426,6 +434,7 @@ func (u *userHandler) UpdateProfile(c echo.Context) error {
 		req         = request.UpdateDataRequest{}
 		ctx         = c.Request().Context()
 		jwtUserData = entity.JwtUserData{}
+		resp        = response.UpdateProfileResponse{}
 	)
 
 	user := c.Get("user").(string)
@@ -463,10 +472,10 @@ func (u *userHandler) UpdateProfile(c echo.Context) error {
 		Lng:     lngString,
 		Phone:   req.Phone,
 		Photo:   req.Photo,
-		RoleID:  2,
 	}
 
-	if err := u.userService.UpdateProfile(ctx, reqEntity); err != nil {
+	token, roleName, err := u.userService.UpdateProfile(ctx, reqEntity)
+	if err != nil {
 		c.Logger().Errorf("[UserHandler-5] UpdateProfile: %v", err)
 		switch err.Error() {
 		case utils.DATA_NOT_FOUND:
@@ -480,7 +489,19 @@ func (u *userHandler) UpdateProfile(c echo.Context) error {
 		}
 	}
 
-	return c.JSON(http.StatusOK, response.ResponseSuccess(nil))
+	resp = response.UpdateProfileResponse{
+		ID:          userId,
+		Name:        req.Name,
+		Email:       req.Email,
+		Phone:       req.Phone,
+		Photo:       req.Photo,
+		Lat:         latString,
+		Lng:         lngString,
+		Role:        roleName,
+		AccessToken: token,
+	}
+
+	return c.JSON(http.StatusOK, response.ResponseSuccess(resp))
 }
 
 // GetProfileById implements UserHandlerInterface.
@@ -612,7 +633,6 @@ func (u *userHandler) ActivateAccount(c echo.Context) error {
 		ID:          user.ID,
 		Name:        user.Name,
 		Email:       user.Email,
-		RoleName:    user.RoleName,
 		AccessToken: user.Token,
 	}
 
@@ -726,7 +746,7 @@ func (u *userHandler) SignIn(c echo.Context) error {
 
 	reqEntity := entity.UserEntity{
 		Email:    req.Email,
-		Password: req.Passowrd,
+		Password: req.Password,
 	}
 
 	user, token, err := u.userService.SignIn(ctx, reqEntity)
@@ -748,10 +768,11 @@ func (u *userHandler) SignIn(c echo.Context) error {
 		ID:          user.ID,
 		Name:        user.Name,
 		Email:       user.Email,
-		RoleName:    user.RoleName,
 		Phone:       user.Phone,
 		Lat:         user.Lat,
 		Lng:         user.Lng,
+		Role:        user.RoleName,
+		Photo:       user.Photo,
 		AccessToken: token,
 	}
 

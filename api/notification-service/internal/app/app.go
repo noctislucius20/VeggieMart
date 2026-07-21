@@ -7,6 +7,8 @@ import (
 	"notification-service/internal/adapter/repository"
 	"notification-service/internal/core/service"
 	"notification-service/utils/logger"
+	"notification-service/utils/ws"
+
 	"os"
 	"os/signal"
 	"syscall"
@@ -29,8 +31,13 @@ func RunServer() {
 		return
 	}
 
+	redisClient, err := cfg.NewRedisClient(serviceCtx)
+	if err != nil {
+		customLogger.Logger().Fatalf("[RunServer-2] %v", err)
+		return
+	}
+
 	e := echo.New()
-	e.Use(middleware.CORS())
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
 		LogURI:        true,
 		LogMethod:     true,
@@ -42,9 +49,13 @@ func RunServer() {
 
 	notificationRepo := repository.NewNotificationRepository(db.DB, customLogger.Logger())
 
+	jwtService := service.NewJwtService(cfg)
 	notificationService := service.NewNotificationService(notificationRepo, txManager, db.DB, customLogger.Logger())
 
-	handler.NewNotificationHandler(notificationService, e, cfg)
+	handler.NewNotificationHandler(e, cfg, notificationService, jwtService, redisClient)
+	handler.NewWebSocketHandler(e, cfg)
+
+	go ws.SubscribeWebSocketChannel(serviceCtx, redisClient, notificationService, customLogger.Logger())
 
 	e.GET("/api/check", func(c echo.Context) error {
 		return c.String(200, "OK")
@@ -57,7 +68,7 @@ func RunServer() {
 
 		err := e.Start(":" + cfg.App.AppPort)
 		if err != nil {
-			customLogger.Logger().Fatalf("[RunServer-2] %v", err)
+			customLogger.Logger().Fatalf("[RunServer-3] %v", err)
 			return
 		}
 	}()
@@ -67,7 +78,7 @@ func RunServer() {
 
 	<-quit
 
-	customLogger.Logger().Infof("[RunServer-3] shutting down server on 5 seconds...")
+	customLogger.Logger().Infof("[RunServer-4] shutting down server on 5 seconds...")
 
 	serviceCancel()
 

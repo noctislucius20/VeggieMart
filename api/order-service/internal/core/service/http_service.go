@@ -24,7 +24,7 @@ type httpService struct {
 
 // HttpUpdateStockProductsService implements [HttpServiceInterface].
 func (h *httpService) HttpUpdateStockProductsService(products []entity.OrderItemEntity, userData string) error {
-	baseUrlProducts := fmt.Sprintf("%s%s", h.cfg.App.ProductServiceUrl, "/products/stock")
+	baseUrlProducts := fmt.Sprintf("%s%s", h.cfg.App.ProductServiceUrl, "/internal/products/stock")
 
 	userDataEntity := entity.JwtUserData{}
 	if err := json.Unmarshal([]byte(userData), &userDataEntity); err != nil {
@@ -65,7 +65,7 @@ func (h *httpService) HttpUpdateStockProductsService(products []entity.OrderItem
 
 // HttpUserByIdService implements [HttpServiceInterface].
 func (h *httpService) HttpUserByIdService(userData string) (*entity.UserResponseEntity, error) {
-	baseUrlUser := fmt.Sprintf("%s%s", h.cfg.App.UserServiceUrl, "/users/profile")
+	baseUrlUser := fmt.Sprintf("%s%s", h.cfg.App.UserServiceUrl, "/internal/users/profile")
 
 	userDataEntity := entity.JwtUserData{}
 	if err := json.Unmarshal([]byte(userData), &userDataEntity); err != nil {
@@ -109,7 +109,7 @@ func (h *httpService) HttpUserByIdService(userData string) (*entity.UserResponse
 
 // HttpGetProductsService implements [HttpServiceInterface].
 func (h *httpService) HttpGetProductsService(productIds []int64, userData string) (map[int64]entity.ProductResponseEntity, error) {
-	baseUrlProducts := fmt.Sprintf("%s%s", h.cfg.App.ProductServiceUrl, "/products/batch")
+	baseUrlProducts := fmt.Sprintf("%s%s", h.cfg.App.ProductServiceUrl, "/internal/products/batch")
 
 	userDataEntity := entity.JwtUserData{}
 	if err := json.Unmarshal([]byte(userData), &userDataEntity); err != nil {

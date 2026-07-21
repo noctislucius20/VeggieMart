@@ -9,7 +9,7 @@ import (
 )
 
 type MidtransClientInterface interface {
-	CreateTransaction(orderCode string, amount int64, customerName string, customerEmail string) (string, error)
+	CreateTransaction(orderCode string, amount int64, customerName string, customerEmail string) (string, string, error)
 }
 
 type midtransClient struct {
@@ -18,9 +18,12 @@ type midtransClient struct {
 }
 
 // CreateTransaction implements [MidtransClientInterface].
-func (m *midtransClient) CreateTransaction(orderCode string, amount int64, customerName string, customerEmail string) (string, error) {
+func (m *midtransClient) CreateTransaction(orderCode string, amount int64, customerName string, customerEmail string) (string, string, error) {
 	midtrans.ServerKey = m.cfg.Midtrans.ServerKey
 	midtrans.Environment = midtrans.EnvironmentType(m.cfg.Midtrans.Environment)
+
+	var s = snap.Client{}
+	s.New(midtrans.ServerKey, midtrans.Environment)
 
 	snapReq := &snap.Request{
 		TransactionDetails: midtrans.TransactionDetails{
@@ -33,13 +36,13 @@ func (m *midtransClient) CreateTransaction(orderCode string, amount int64, custo
 		},
 	}
 
-	snapRes, err := snap.CreateTransaction(snapReq)
+	snapRes, err := s.CreateTransaction(snapReq)
 	if err != nil {
 		m.logger.Errorf("[MidtransClient-1] failed to create transaction: %v", err)
-		return "", err
+		return "", "", err
 	}
 
-	return snapRes.Token, nil
+	return snapRes.Token, snapRes.RedirectURL, nil
 }
 
 func NewMidtransclient(cfg *config.Config, logger *log.Logger) MidtransClientInterface {

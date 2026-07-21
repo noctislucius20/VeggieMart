@@ -17,8 +17,9 @@ import (
 
 type PaymentCacheInterface interface {
 	GetPaymentById(ctx context.Context, paymentId int64, userId int64) (*entity.PaymentEntity, error)
+	GetPaymentByOrderId(ctx context.Context, orderId int64, userId int64) (*entity.PaymentEntity, error)
 	GetRoleById(ctx context.Context, id int64) (*entity.RoleEntity, error)
-	DeletePaymentCache(ctx context.Context, id int64) error
+	DeletePaymentCache(ctx context.Context, id int64, orderId int64) error
 }
 
 type paymentCache struct {
@@ -100,11 +101,58 @@ func (p *paymentCache) GetPaymentById(ctx context.Context, paymentId int64, user
 	return &payment, nil
 }
 
+// GetPaymentByOrderId implements [PaymentCacheInterface].
+func (p *paymentCache) GetPaymentByOrderId(ctx context.Context, orderId int64, userId int64) (*entity.PaymentEntity, error) {
+	var (
+		payment entity.PaymentEntity
+		key     = fmt.Sprintf("payment:order_id:%d", orderId)
+	)
+
+	// Check redis if data exists.
+	val, err := p.redisClient.Get(ctx, key).Result()
+	if err == nil {
+		// if key exists but value null, return data not found error
+		if val == "null" {
+			err := errors.New(utils.DATA_NOT_FOUND)
+			p.logger.Errorf("[PaymentCache-1] GetPaymentByOrderId: %v", err)
+			return nil, err
+		}
+
+		json.Unmarshal([]byte(val), &payment)
+
+		return &payment, nil
+	}
+
+	paymentEntity, err := p.repoPayment.GetPaymentByOrderId(ctx, orderId, userId)
+	if err != nil {
+		if err.Error() == utils.DATA_NOT_FOUND {
+			if err := p.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
+				p.logger.Errorf("[PaymentCache-2] GetPaymentByOrderId: %v", err)
+			}
+		}
+
+		p.logger.Errorf("[PaymentCache-3] GetPaymentByOrderId: %v", err)
+		return nil, err
+	}
+
+	payment = *paymentEntity
+
+	// Save to redis
+	jsonData, _ := json.Marshal(payment)
+	ttl := 10*time.Minute + time.Duration(rand.Intn(120))*time.Second
+	if err := p.redisClient.Set(ctx, key, jsonData, ttl).Err(); err != nil {
+		p.logger.Errorf("[PaymentCache-4] GetPaymentByOrderId: %v", err)
+	}
+
+	return &payment, nil
+}
+
 // DeletePaymentCache implements [PaymentCacheInterface].
-func (p *paymentCache) DeletePaymentCache(ctx context.Context, id int64) error {
+func (p *paymentCache) DeletePaymentCache(ctx context.Context, id int64, orderId int64) error {
 	var (
 		delKeys = []string{
 			fmt.Sprintf("payment:id:%d", id),
+			fmt.Sprintf("payment:order_id:%d", orderId),
 		}
 	)
 

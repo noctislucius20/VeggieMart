@@ -35,6 +35,12 @@ func StartConsumerWorker() {
 		return
 	}
 
+	redisClient, err := cfg.NewRedisClient(ctx)
+	if err != nil {
+		customLogger.Fatalf("[StartConsumerWorker-3] %v", err)
+		return
+	}
+
 	notificationRepo := repository.NewNotificationRepository(db.DB, customLogger)
 
 	txManager := repository.NewGormTransactionManager(db.DB)
@@ -42,7 +48,7 @@ func StartConsumerWorker() {
 	emailService := message.NewEmailMessage(cfg)
 	notificationService := service.NewNotificationService(notificationRepo, txManager, db.DB, customLogger)
 
-	consumerWorker := consumer.NewNotificationConsumerWorker(emailService, notificationRepo, txManager, notificationService, conn, db.DB, customLogger)
+	consumerWorker := consumer.NewNotificationConsumerWorker(emailService, notificationRepo, txManager, notificationService, conn, db.DB, redisClient, customLogger)
 
 	wg.Go(func() {
 		consumerWorker.StartCreateNotificationWorker(ctx, utils.NOTIF_EMAIL_VERIFICATION)

@@ -16,10 +16,12 @@ import (
 
 type NotificationRepositoryInterface interface {
 	GetAllNotifications(ctx context.Context, query entity.NotificationQueryString) ([]entity.NotificationEntity, int64, int64, error)
+	GetAllPushNotification(ctx context.Context, query entity.NotificationQueryString) ([]entity.NotificationEntity, int64, int64, error)
 	GetNotificationById(ctx context.Context, notificationId int64) (*entity.NotificationEntity, error)
-	CreateNotification(ctx context.Context, notification entity.NotificationEntity) error
+	CreateNotification(ctx context.Context, notification entity.NotificationEntity) (int64, error)
 	MarkAsSentNotification(ctx context.Context, notificationId int64) error
 	MarkAsReadNotification(ctx context.Context, notificationId int64) error
+	MarkAllAsSentNotification(ctx context.Context, userId int64) error
 
 	getDB(ctx context.Context) *gorm.DB
 }
@@ -42,6 +44,88 @@ func (n *notificationRepository) getDB(ctx context.Context) *gorm.DB {
 	return n.db
 }
 
+// GetAllPushNotification implements [NotificationRepositoryInterface].
+func (n *notificationRepository) GetAllPushNotification(ctx context.Context, query entity.NotificationQueryString) ([]entity.NotificationEntity, int64, int64, error) {
+	var (
+		db                 = n.getDB(ctx)
+		modelNotifications []model.Notification
+	)
+
+	var countData int64
+
+	offset := (query.Page - 1) * query.Limit
+
+	sqlMain := db.WithContext(ctx).
+		Omit("created_at", "updated_at", "deleted_at").
+		Where("subject ILIKE ? OR message ILIKE ? OR status ILIKE ?", "%"+query.Search+"%", "%"+query.Search+"%", "%"+query.Status+"%").
+		Where("notification_type = ?", "PUSH")
+
+	if query.UserID != 0 {
+		sqlMain = sqlMain.Where("receiver_id = ?", query.UserID)
+	}
+
+	if query.IsRead {
+		sqlMain = sqlMain.Where("read_at IS NOT NULL")
+	}
+
+	if err := sqlMain.Model(&modelNotifications).
+		Count(&countData).Error; err != nil {
+		n.logger.Errorf("[NotificationRepository-1] GetAllPushNotification: %v", err)
+		return nil, 0, 0, err
+	}
+
+	orderSort := fmt.Sprintf("%s %s", query.OrderBy, query.OrderType)
+
+	if err := sqlMain.Order(orderSort).
+		Limit(int(query.Limit)).
+		Offset(int(offset)).
+		Find(&modelNotifications).Error; err != nil {
+		n.logger.Errorf("[NotificationRepository-2] GetAllPushNotification: %v", err)
+		return nil, 0, 0, err
+	}
+
+	var notifications []entity.NotificationEntity
+	for _, modelNotification := range modelNotifications {
+		notifications = append(notifications, entity.NotificationEntity{
+			ID:               modelNotification.ID,
+			Subject:          modelNotification.Subject,
+			Status:           modelNotification.Status,
+			SentAt:           modelNotification.SentAt,
+			ReadAt:           modelNotification.ReadAt,
+			Message:          modelNotification.Message,
+			NotificationType: modelNotification.NotificationType,
+		})
+	}
+
+	totalPage := int64(math.Ceil(float64(countData) / float64(query.Limit)))
+
+	return notifications, countData, totalPage, nil
+}
+
+// MarkAllAsSentNotification implements [NotificationRepositoryInterface].
+func (n *notificationRepository) MarkAllAsSentNotification(ctx context.Context, userId int64) error {
+	var (
+		db                = n.getDB(ctx)
+		now               = time.Now()
+		modelNotification = model.Notification{
+			Status: "SENT",
+			SentAt: &now,
+		}
+	)
+
+	tx := db.WithContext(ctx).
+		Where("receiver_id = ?", userId).
+		Where("notification_type = ?", "PUSH").
+		Where("status = ?", "PENDING").
+		Updates(&modelNotification)
+	if tx.Error != nil {
+		n.logger.Errorf("[NotificationRepository-1] MarkAllAsSentNotification: %v", tx.Error)
+		return tx.Error
+	}
+
+	return nil
+}
+
 // MarkAsReadNotification implements [NotificationRepositoryInterface].
 func (n *notificationRepository) MarkAsReadNotification(ctx context.Context, notificationId int64) error {
 	var (
@@ -53,8 +137,15 @@ func (n *notificationRepository) MarkAsReadNotification(ctx context.Context, not
 		}
 	)
 
-	if err := db.WithContext(ctx).Updates(&modelNotification).Error; err != nil {
-		n.logger.Errorf("[NotificationRepository-1] MarkAsReadNotification: %v", err)
+	tx := db.WithContext(ctx).Updates(&modelNotification)
+	if tx.Error != nil {
+		n.logger.Errorf("[NotificationRepository-1] MarkAsReadNotification: %v", tx.Error)
+		return tx.Error
+	}
+
+	if tx.RowsAffected == 0 {
+		err := errors.New(utils.DATA_NOT_FOUND)
+		n.logger.Errorf("[NotificationRepository-2] MarkAsReadNotification: %v", err)
 		return err
 	}
 
@@ -65,14 +156,23 @@ func (n *notificationRepository) MarkAsReadNotification(ctx context.Context, not
 func (n *notificationRepository) MarkAsSentNotification(ctx context.Context, notificationId int64) error {
 	var (
 		db                = n.getDB(ctx)
+		now               = time.Now()
 		modelNotification = model.Notification{
 			ID:     notificationId,
+			SentAt: &now,
 			Status: "SENT",
 		}
 	)
 
-	if err := db.WithContext(ctx).Updates(&modelNotification).Error; err != nil {
-		n.logger.Errorf("[NotificationRepository-1] MarkAsSentNotification: %v", err)
+	tx := db.WithContext(ctx).Updates(&modelNotification)
+	if tx.Error != nil {
+		n.logger.Errorf("[NotificationRepository-1] MarkAsSentNotification: %v", tx.Error)
+		return tx.Error
+	}
+
+	if tx.RowsAffected == 0 {
+		err := errors.New(utils.DATA_NOT_FOUND)
+		n.logger.Errorf("[NotificationRepository-2] MarkAsSentNotification: %v", err)
 		return err
 	}
 
@@ -80,7 +180,7 @@ func (n *notificationRepository) MarkAsSentNotification(ctx context.Context, not
 }
 
 // CreateNotification implements [NotificationRepositoryInterface].
-func (n *notificationRepository) CreateNotification(ctx context.Context, notification entity.NotificationEntity) error {
+func (n *notificationRepository) CreateNotification(ctx context.Context, notification entity.NotificationEntity) (int64, error) {
 	var (
 		db                = n.getDB(ctx)
 		now               = time.Now()
@@ -88,19 +188,23 @@ func (n *notificationRepository) CreateNotification(ctx context.Context, notific
 			ReceiverID:       notification.ReceiverID,
 			Subject:          notification.Subject,
 			Status:           notification.Status,
-			SentAt:           &now,
 			ReadAt:           notification.ReadAt,
 			Message:          notification.Message,
 			NotificationType: notification.NotificationType,
 		}
 	)
 
-	if err := db.WithContext(ctx).Create(&modelNotification).Error; err != nil {
-		n.logger.Errorf("[NotificationRepository-1] CreateNotification: %v", err)
-		return err
+	if notification.NotificationType == "EMAIL" {
+		modelNotification.SentAt = &now
+		modelNotification.ReceiverEmail = notification.ReceiverEmail
 	}
 
-	return nil
+	if err := db.WithContext(ctx).Create(&modelNotification).Error; err != nil {
+		n.logger.Errorf("[NotificationRepository-1] CreateNotification: %v", err)
+		return 0, err
+	}
+
+	return modelNotification.ID, nil
 }
 
 // GetNotificationById implements [NotificationRepositoryInterface].

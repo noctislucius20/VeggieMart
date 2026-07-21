@@ -44,16 +44,30 @@ type Midtrans struct {
 }
 
 type PublisherName struct {
-	PaymentSuccess string `json:"payment_success"`
+	PaymentSuccess     string `json:"payment_success"`
+	PaymentUpdate      string `json:"payment_update"`
+	OrderPaymentCreate string `json:"order_payment_create"`
+}
+
+type APIGateway struct {
+	RequestAPI string `json:"request_api"`
+	SecretKey  string `json:"secret_key"`
+}
+
+type APIInternalService struct {
+	ServiceName string `json:"service_name"`
+	SecretKey   string `json:"secret_key"`
 }
 
 type Config struct {
-	App           App           `json:"app"`
-	Psql          PsqlDB        `json:"psql"`
-	RabbitMQ      RabbitMQ      `json:"rabbitmq"`
-	Redis         Redis         `json:"redis"`
-	Midtrans      Midtrans      `json:"midtrans"`
-	PublisherName PublisherName `json:"publisher_name"`
+	App                App                `json:"app"`
+	Psql               PsqlDB             `json:"psql"`
+	RabbitMQ           RabbitMQ           `json:"rabbitmq"`
+	Redis              Redis              `json:"redis"`
+	Midtrans           Midtrans           `json:"midtrans"`
+	PublisherName      PublisherName      `json:"publisher_name"`
+	APIGateway         APIGateway         `json:"api_gateway"`
+	APIInternalService APIInternalService `json:"api_internal_service"`
 }
 
 func NewConfig() *Config {
@@ -97,7 +111,17 @@ func NewConfig() *Config {
 			Environment: viper.GetInt("MIDTRANS_ENVIRONMENT"),
 		},
 		PublisherName: PublisherName{
-			PaymentSuccess: viper.GetString("PAYMENT_SUCCESS"),
+			PaymentSuccess:     viper.GetString("PAYMENT_SUCCESS"),
+			PaymentUpdate:      viper.GetString("PAYMENT_UPDATE"),
+			OrderPaymentCreate: viper.GetString("ORDER_PAYMENT_CREATE"),
+		},
+		APIGateway: APIGateway{
+			RequestAPI: viper.GetString("GATEWAY_REQUEST_API"),
+			SecretKey:  viper.GetString("GATEWAY_SECRET_KEY"),
+		},
+		APIInternalService: APIInternalService{
+			ServiceName: viper.GetString("INTERNAL_SERVICE_NAME"),
+			SecretKey:   viper.GetString("INTERNAL_SERVICE_SECRET"),
 		},
 	}
 }

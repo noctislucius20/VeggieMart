@@ -10,6 +10,7 @@ import (
 	"order-service/internal/adapter/handler/response"
 	"order-service/internal/core/domain/entity"
 	"order-service/internal/core/service"
+	middlewareGateway "order-service/internal/middleware"
 	"order-service/utils"
 	"order-service/utils/conv"
 	"order-service/utils/logger"
@@ -43,7 +44,7 @@ func NewOrderHandler(e *echo.Echo, cfg *config.Config, orderService service.Orde
 
 	e.Use(middleware.Recover())
 	e.Use(middleware.ContextTimeoutWithConfig(middleware.ContextTimeoutConfig{
-		Timeout: 10 * time.Second,
+		Timeout: 100 * time.Second,
 	}))
 
 	mid := adapter.NewMiddlewareAdapter(cfg, logger.NewLogger().Logger(), jwtService, redisClient)
@@ -62,16 +63,25 @@ func NewOrderHandler(e *echo.Echo, cfg *config.Config, orderService service.Orde
 		"orders:delete:all",
 	}
 
+	orderGroup := e.Group("/orders")
+	internalOrderGroup := e.Group("/internal/orders")
+
+	orderGroup.Use(middlewareGateway.GatewayValidationMiddleware(cfg))
+	internalOrderGroup.Use(middlewareGateway.InternalServiceMiddleware(cfg))
+
 	// authGroup := e.Group("/auth", mid.CheckToken())
-	e.POST("/orders", orderHandler.CreateOrder, mid.CheckToken(), mid.RequiredPermission(authPermission...), mid.DistanceCheck())
-	e.GET("/orders", orderHandler.GetAllOrders, mid.CheckToken(), mid.RequiredPermission(authPermission...))
-	e.GET("/orders/:id", orderHandler.GetOrderById, mid.CheckToken(), mid.RequiredPermission(authPermission...))
-	e.GET("/orders/:orderCode/code", orderHandler.GetOrderByOrderCode, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	orderGroup.POST("", orderHandler.CreateOrder, mid.CheckToken(), mid.RequiredPermission(authPermission...), mid.DistanceCheck())
+	orderGroup.GET("", orderHandler.GetAllOrders, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	orderGroup.GET("/:id", orderHandler.GetOrderById, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	orderGroup.GET("/:orderCode/code", orderHandler.GetOrderByOrderCode, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 
 	// adminGroup := e.Group("/admin", mid.CheckToken())
-	e.GET("/orders/admin", orderHandler.GetAllOrdersAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.GET("/orders/:id/admin", orderHandler.GetOrderByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	e.PUT("/orders/:id/status", orderHandler.UpdateOrderStatusByAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	orderGroup.GET("/admin", orderHandler.GetAllOrdersAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	orderGroup.GET("/:id/admin", orderHandler.GetOrderByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	orderGroup.PUT("/:id/status", orderHandler.UpdateOrderStatusByAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+
+	internalOrderGroup.GET("/:id", orderHandler.GetOrderById, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	internalOrderGroup.GET("/:id/admin", orderHandler.GetOrderByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
 
 	return orderHandler
 }
@@ -243,7 +253,7 @@ func (o *orderHandler) GetAllOrders(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
-	limit, err := conv.ParseInt64QueryParam(c, "limit", 10)
+	limit, err := conv.ParseInt64QueryParam(c, "limit", 5)
 	if err != nil {
 		c.Logger().Errorf("[OrderHandler-4] GetAllOrders: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
@@ -266,19 +276,27 @@ func (o *orderHandler) GetAllOrders(c echo.Context) error {
 	}
 
 	for _, result := range results {
+		var orderItemsTotal int64 = 0
+
+		for _, item := range result.OrderItems {
+			orderItemsTotal += item.Quantity
+		}
+
 		// productImage := ""
 		// for _, item := range result.OrderItems {
 		// 	productImage = item.ProductImage
 		// }
 		respOrders = append(respOrders, response.OrderCustomerList{
-			ID:            result.ID,
-			OrderCode:     result.OrderCode,
-			Status:        result.Status,
-			ProductName:   result.OrderItems[0].ProductName,
-			TotalAmount:   result.TotalAmount,
-			ProductImage:  result.OrderItems[0].ProductImage,
-			OrderDatetime: fmt.Sprintf("%s %s", result.OrderDate, result.OrderTime),
+			ID:                 result.ID,
+			OrderCode:          result.OrderCode,
+			Status:             result.Status,
+			OrderItemsQuantity: orderItemsTotal,
+			ProductName:        result.OrderItems[0].ProductName,
+			TotalAmount:        result.TotalAmount,
+			ProductImage:       result.OrderItems[0].ProductImage,
+			OrderDatetime:      fmt.Sprintf("%s %s", result.OrderDate, result.OrderTime),
 		})
+
 	}
 
 	pagination := response.Pagination{
@@ -377,12 +395,12 @@ func (o *orderHandler) CreateOrder(c echo.Context) error {
 	}
 
 	reqEntity := entity.OrderEntity{
-		BuyerID:      jwtUserData.UserID,
-		OrderDate:    req.OrderDate,
-		TotalAmount:  req.TotalAmount,
-		ShippingType: req.ShippingType,
-		Remarks:      req.Remarks,
-		OrderTime:    req.OrderTime,
+		BuyerID:       jwtUserData.UserID,
+		PaymentMethod: req.PaymentType,
+		OrderDate:     req.OrderDate,
+		ShippingType:  req.ShippingType,
+		Remarks:       req.Remarks,
+		OrderTime:     req.OrderTime,
 	}
 
 	orderDetails := []entity.OrderItemEntity{}
@@ -508,7 +526,7 @@ func (o *orderHandler) GetAllOrdersAdmin(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
-	limit, err := conv.ParseInt64QueryParam(c, "limit", 10)
+	limit, err := conv.ParseInt64QueryParam(c, "limit", 5)
 	if err != nil {
 		c.Logger().Errorf("[OrderHandler-3] GetAllOrdersAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
@@ -535,12 +553,13 @@ func (o *orderHandler) GetAllOrdersAdmin(c echo.Context) error {
 		// 	productImage = item.ProductImage
 		// }
 		respOrders = append(respOrders, response.OrderListResponse{
-			ID:           result.ID,
-			OrderCode:    result.OrderCode,
-			Status:       result.Status,
-			TotalAmount:  result.TotalAmount,
-			CustomerName: result.BuyerName,
-			ProductImage: result.OrderItems[0].ProductImage,
+			ID:            result.ID,
+			OrderCode:     result.OrderCode,
+			Status:        result.Status,
+			OrderDatetime: fmt.Sprintf("%s %s", result.OrderDate, result.OrderTime),
+			TotalAmount:   result.TotalAmount,
+			CustomerName:  result.BuyerName,
+			ProductImage:  result.OrderItems[0].ProductImage,
 		})
 	}
 

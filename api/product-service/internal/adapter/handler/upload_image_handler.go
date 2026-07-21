@@ -11,6 +11,7 @@ import (
 	"product-service/internal/adapter/handler/response"
 	"product-service/internal/adapter/storage"
 	"product-service/internal/core/service"
+	middlewareGateway "product-service/internal/middleware"
 	"product-service/utils"
 	"product-service/utils/logger"
 	"time"
@@ -93,7 +94,10 @@ func NewUploadImageStorageHandler(e *echo.Echo, cfg *config.Config, jwtService s
 	}
 
 	// adminGroup := e.Group("/admin", mid.CheckToken())
-	e.POST("/products/image-upload", uploadImageHandler.UploadImage, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	productGroup := e.Group("/products")
+	productGroup.Use(middlewareGateway.GatewayValidationMiddleware(cfg))
+
+	productGroup.POST("/image-upload", uploadImageHandler.UploadImage, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 
 	return uploadImageHandler
 }

@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"payment-service/config"
 	httpclient "payment-service/internal/adapter/http_client"
 	"payment-service/internal/adapter/repository"
@@ -20,6 +22,7 @@ type PaymentServiceInterface interface {
 	UpdateStatusByOrderCode(ctx context.Context, orderCode string, status string) error
 	GetAllPayments(ctx context.Context, query entity.QueryStringPayment, userData string) ([]entity.PaymentEntity, int64, int64, error)
 	GetPaymentById(ctx context.Context, paymentId int64, jwtUserData entity.JwtUserData, userData string) (*entity.PaymentEntity, error)
+	GetPaymentByOrderId(ctx context.Context, orderId int64, jwtUserData entity.JwtUserData, userData string) (*entity.PaymentEntity, error)
 
 	getOrderHttp(ctx context.Context, payment *entity.PaymentEntity, jwtUserData entity.JwtUserData, roleName string) error
 }
@@ -84,6 +87,42 @@ func (p *paymentService) GetPaymentById(ctx context.Context, paymentId int64, jw
 	return payment, nil
 }
 
+// GetPaymentByOrderId implements [PaymentServiceInterface].
+func (p *paymentService) GetPaymentByOrderId(ctx context.Context, orderId int64, jwtUserData entity.JwtUserData, userData string) (*entity.PaymentEntity, error) {
+	payment := &entity.PaymentEntity{}
+
+	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		roleEntity, err := p.cachePayment.GetRoleById(txCtx, jwtUserData.RoleID)
+		if err != nil {
+			return err
+		}
+
+		switch strings.ToLower(roleEntity.Name) {
+		case "customer": // requested by customer
+			paymentEntity, err := p.cachePayment.GetPaymentByOrderId(txCtx, orderId, int64(jwtUserData.UserID))
+			if err != nil {
+				return err
+			}
+
+			payment = paymentEntity
+		default: // requested by admin
+			paymentEntity, err := p.cachePayment.GetPaymentByOrderId(txCtx, orderId, 0)
+			if err != nil {
+				return err
+			}
+
+			payment = paymentEntity
+		}
+
+		return nil
+	}); err != nil {
+		p.logger.Errorf("[PaymentService-1] GetPaymentByOrderId: %v", err)
+		return nil, err
+	}
+
+	return payment, nil
+}
+
 // GetAllPayments implements [PaymentServiceInterface].
 func (p *paymentService) GetAllPayments(ctx context.Context, query entity.QueryStringPayment, userData string) ([]entity.PaymentEntity, int64, int64, error) {
 	var (
@@ -116,17 +155,16 @@ func (p *paymentService) GetAllPayments(ctx context.Context, query entity.QueryS
 // UpdateStatusByOrderCode implements [PaymentServiceInterface].
 func (p *paymentService) UpdateStatusByOrderCode(ctx context.Context, orderCode string, status string) error {
 	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
-		orderId, err := p.repo.GetOrderIdByOrderCode(txCtx, orderCode)
+		paymentId, orderId, err := p.repo.GetPaymentOrderIdByOrderCode(txCtx, orderCode)
 		if err != nil {
 			return err
 		}
 
-		paymentId, err := p.repo.UpdateStatusByOrderCode(txCtx, orderId, status)
-		if err != nil {
+		if err := p.repo.UpdateStatusByPaymentId(txCtx, paymentId, status); err != nil {
 			return err
 		}
 
-		if err := p.cachePayment.DeletePaymentCache(txCtx, int64(paymentId)); err != nil {
+		if err := p.cachePayment.DeletePaymentCache(txCtx, paymentId, orderId); err != nil {
 			return err
 		}
 
@@ -141,7 +179,11 @@ func (p *paymentService) UpdateStatusByOrderCode(ctx context.Context, orderCode 
 
 // ProcessPayment implements [PaymentServiceInterface].
 func (p *paymentService) ProcessPayment(ctx context.Context, payment entity.PaymentEntity, jwtUserData entity.JwtUserData) (*entity.PaymentEntity, error) {
-	publishPaymentSuccess := p.cfg.PublisherName.PaymentSuccess
+	var (
+		publishPaymentSuccess = p.cfg.PublisherName.PaymentSuccess
+		publishPaymentUpdate  = p.cfg.PublisherName.PaymentUpdate
+		outboxEventEntities   []entity.OutboxEventEntity
+	)
 
 	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
 		roleEntity, err := p.cachePayment.GetRoleById(txCtx, jwtUserData.RoleID)
@@ -155,73 +197,54 @@ func (p *paymentService) ProcessPayment(ctx context.Context, payment entity.Paym
 
 		switch strings.ToLower(payment.PaymentMethod) {
 		case "cod":
-			payment.PaymentStatus = "SUCCESS"
-
-			paymentId, paymentStatus, err := p.repo.CreatePayment(txCtx, &payment)
-			if err != nil {
-				return err
-			}
-
-			if err := p.cachePayment.DeletePaymentCache(txCtx, int64(paymentId)); err != nil {
-				return err
-			}
-
-			if err := p.repo.CreatePaymentLog(txCtx, paymentId, paymentStatus); err != nil {
-				return err
-			}
-
-			// paymentEntity, err := p.repo.GetPaymentById(txCtx, paymentId, 0)
-			// if err != nil {
-			// 	return err
-			// }
-
+			// consumed by order service elastic
 			payloadPublish := map[string]any{
 				"order_id":       payment.Order.ID,
 				"payment_method": payment.PaymentMethod,
 			}
 
-			if err := p.repoOutbox.CreateEvent(txCtx, publishPaymentSuccess, payloadPublish, &paymentId); err != nil {
+			if err := p.repoOutbox.CreateEvent(txCtx, publishPaymentSuccess, payloadPublish, &payment.Order.ID); err != nil {
 				return err
 			}
 
-			payment.ID = paymentId
-		case "midtrans":
-			transactionId, err := p.midtrans.CreateTransaction(payment.Order.OrderCode, int64(payment.GrossAmount), payment.Customer.CustomerName, payment.Customer.CustomerEmail)
+		case "transfer":
+			transactionId, redirectUrl, err := p.midtrans.CreateTransaction(payment.Order.OrderCode, int64(payment.Order.TotalAmount), payment.Customer.CustomerName, payment.Customer.CustomerEmail)
 			if err != nil {
 				return err
 			}
 
-			payment.PaymentStatus = "PENDING"
 			payment.PaymentGatewayID = transactionId
+			payment.PaymentURL = redirectUrl
 
-			paymentId, paymentStatus, err := p.repo.CreatePayment(txCtx, &payment)
-			if err != nil {
-				return err
-			}
-
-			if err := p.cachePayment.DeletePaymentCache(txCtx, int64(paymentId)); err != nil {
-				return err
-			}
-
-			if err := p.repo.CreatePaymentLog(txCtx, paymentId, paymentStatus); err != nil {
-				return err
-			}
-
-			// paymentEntity, err := p.repo.GetPaymentById(txCtx, paymentId, 0)
-			// if err != nil {
-			// 	return err
-			// }
-
-			payloadPublish := map[string]any{
+			// consumed by order service elastic
+			jsonPaymentSuccess, _ := json.Marshal(map[string]any{
 				"order_id":       payment.Order.ID,
 				"payment_method": payment.PaymentMethod,
-			}
+			})
 
-			if err := p.repoOutbox.CreateEvent(txCtx, publishPaymentSuccess, payloadPublish, &paymentId); err != nil {
+			outboxEventEntities = append(outboxEventEntities, entity.OutboxEventEntity{
+				EventType:   publishPaymentSuccess,
+				Payload:     string(jsonPaymentSuccess),
+				AggregateID: fmt.Sprintf("%d", payment.Order.ID),
+			})
+
+			// consumed by payment service db
+			jsonUpdatePayment, _ := json.Marshal(map[string]any{
+				"order_id":           payment.Order.ID,
+				"payment_gateway_id": transactionId,
+				"payment_url":        redirectUrl,
+			})
+
+			outboxEventEntities = append(outboxEventEntities, entity.OutboxEventEntity{
+				EventType:   publishPaymentUpdate,
+				Payload:     string(jsonUpdatePayment),
+				AggregateID: fmt.Sprintf("%d", payment.Order.ID),
+			})
+
+			if err := p.repoOutbox.CreateBatchEvents(txCtx, outboxEventEntities); err != nil {
 				return err
 			}
 
-			payment.ID = paymentId
 		default:
 			return errors.New(utils.INVALID_PAYMENT_METHOD)
 		}

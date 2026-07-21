@@ -42,12 +42,23 @@ type Redis struct {
 	Port string `json:"port"`
 }
 
+type APIGateway struct {
+	RequestAPI string `json:"request_api"`
+	SecretKey  string `json:"secret_key"`
+}
+
+type APIInternalService struct {
+	SecretKey string `json:"secret_key"`
+}
+
 type Config struct {
-	App      App      `json:"app"`
-	Psql     PsqlDB   `json:"psql"`
-	RabbitMQ RabbitMQ `json:"rabbitmq"`
-	Storage  Supabase `json:"storage"`
-	Redis    Redis    `json:"redis"`
+	App                App                `json:"app"`
+	Psql               PsqlDB             `json:"psql"`
+	RabbitMQ           RabbitMQ           `json:"rabbitmq"`
+	Storage            Supabase           `json:"storage"`
+	Redis              Redis              `json:"redis"`
+	APIGateway         APIGateway         `json:"api_gateway"`
+	APIInternalService APIInternalService `json:"api_internal_service"`
 }
 
 func NewConfig() *Config {
@@ -62,7 +73,6 @@ func NewConfig() *Config {
 			UrlUsersService: viper.GetString("URL_USERS_SERVICE"),
 			UrlFrontEnd:     viper.GetString("URL_FRONT_END"),
 		},
-
 		Psql: PsqlDB{
 			Host:             viper.GetString("DB_HOST"),
 			Port:             viper.GetString("DB_PORT"),
@@ -73,7 +83,6 @@ func NewConfig() *Config {
 			DBMaxOpen:        viper.GetInt("DB_MAX_OPEN_CONNECTION"),
 			DBMaxIdle:        viper.GetInt("DB_MAX_IDLE_CONNECTION"),
 		},
-
 		RabbitMQ: RabbitMQ{
 			Host:     viper.GetString("RABBITMQ_HOST"),
 			Port:     viper.GetString("RABBITMQ_PORT"),
@@ -88,6 +97,13 @@ func NewConfig() *Config {
 		Redis: Redis{
 			Host: viper.GetString("REDIS_HOST"),
 			Port: viper.GetString("REDIS_PORT"),
+		},
+		APIGateway: APIGateway{
+			RequestAPI: viper.GetString("GATEWAY_REQUEST_API"),
+			SecretKey:  viper.GetString("GATEWAY_SECRET_KEY"),
+		},
+		APIInternalService: APIInternalService{
+			SecretKey: viper.GetString("INTERNAL_SERVICE_SECRET"),
 		},
 	}
 }

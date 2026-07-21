@@ -12,12 +12,12 @@ import (
 	"user-service/internal/adapter/handler/response"
 	"user-service/internal/adapter/storage"
 	"user-service/internal/core/service"
+	middlewareGateway "user-service/internal/middleware"
 	"user-service/utils/logger"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/gommon/log"
 )
 
 type UploadImageInterface interface {
@@ -30,22 +30,16 @@ type uploadImageStruct struct {
 
 // UploadImage implements UploadImageInterface.
 func (u *uploadImageStruct) UploadImage(c echo.Context) error {
-	var resp = response.DefaultResponse{}
-
 	file, err := c.FormFile("photo")
 	if err != nil {
-		log.Errorf("[UploadImage-1] UploadImage: %v", err)
-		resp.Message = err.Error()
-		resp.Data = nil
-		return c.JSON(http.StatusUnprocessableEntity, resp)
+		c.Logger().Errorf("[UploadImage-1] UploadImage: %v", err)
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	src, err := file.Open()
 	if err != nil {
-		log.Errorf("[UploadImage-2] UploadImage: %v", err)
-		resp.Message = err.Error()
-		resp.Data = nil
-		return c.JSON(http.StatusBadRequest, resp)
+		c.Logger().Errorf("[UploadImage-2] UploadImage: %v", err)
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	defer src.Close()
@@ -53,10 +47,8 @@ func (u *uploadImageStruct) UploadImage(c echo.Context) error {
 	fileBuffer := new(bytes.Buffer)
 	_, err = io.Copy(fileBuffer, src)
 	if err != nil {
-		log.Errorf("[UploadImage-3] UploadImage: %v", err)
-		resp.Message = err.Error()
-		resp.Data = nil
-		return c.JSON(http.StatusInternalServerError, resp)
+		c.Logger().Errorf("[UploadImage-3] UploadImage: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
 	}
 
 	newFileName := fmt.Sprintf("%s_%d%s", uuid.New().String(), time.Now().Unix(), path.Ext(file.Filename))
@@ -64,16 +56,11 @@ func (u *uploadImageStruct) UploadImage(c echo.Context) error {
 	uploadPath := fmt.Sprintf("public/uploads/%s", newFileName)
 	url, err := u.storageHandler.UploadFile(uploadPath, fileBuffer)
 	if err != nil {
-		log.Errorf("[UploadImage-4] UploadImage: %v", err)
-		resp.Message = err.Error()
-		resp.Data = nil
-		return c.JSON(http.StatusInternalServerError, resp)
+		c.Logger().Errorf("[UploadImage-4] UploadImage: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
 	}
 
-	resp.Message = "success"
-	resp.Data = map[string]string{"image_url": url}
-
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, response.ResponseSuccess(map[string]string{"image_url": url}))
 
 }
 
@@ -91,7 +78,10 @@ func NewUploadImageStorageHandler(e *echo.Echo, cfg *config.Config, jwtService s
 		"users:delete:own",
 	}
 
-	e.POST("users/profile/image-upload", res.UploadImage, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	userGroup := e.Group("/users")
+	userGroup.Use(middlewareGateway.GatewayValidationMiddleware(cfg))
+
+	userGroup.POST("/profile/image-upload", res.UploadImage, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 
 	return res
 }

@@ -41,12 +41,18 @@ type Redis struct {
 	Port string `json:"port"`
 }
 
+type APIGateway struct {
+	RequestAPI string `json:"request_api"`
+	SecretKey  string `json:"secret_key"`
+}
+
 type Config struct {
 	App         App         `json:"app"`
 	Psql        PsqlDB      `json:"psql"`
 	RabbitMQ    RabbitMQ    `json:"rabbitmq"`
 	Redis       Redis       `json:"redis"`
 	EmailConfig EmailConfig `json:"email_config"`
+	APIGateway  APIGateway  `json:"api_gateway"`
 }
 
 func NewConfig() *Config {
@@ -88,6 +94,11 @@ func NewConfig() *Config {
 		Redis: Redis{
 			Host: viper.GetString("REDIS_HOST"),
 			Port: viper.GetString("REDIS_PORT"),
+		},
+
+		APIGateway: APIGateway{
+			RequestAPI: viper.GetString("GATEWAY_REQUEST_API"),
+			SecretKey:  viper.GetString("GATEWAY_SECRET_KEY"),
 		},
 	}
 }

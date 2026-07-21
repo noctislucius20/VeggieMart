@@ -10,6 +10,7 @@ import (
 	"product-service/internal/adapter/handler/response"
 	"product-service/internal/core/domain/entity"
 	"product-service/internal/core/service"
+	middlewareGateway "product-service/internal/middleware"
 	"product-service/utils"
 	"product-service/utils/logger"
 	"strconv"
@@ -24,6 +25,7 @@ type CartHandlerInterface interface {
 	AddToCart(c echo.Context) error
 	GetCart(c echo.Context) error
 	RemoveFromCart(c echo.Context) error
+	RemoveAllFromCart(c echo.Context) error
 }
 
 type cartHandler struct {
@@ -41,15 +43,20 @@ func NewCartHandler(e *echo.Echo, cartService service.CartServiceInterface, cfg 
 	mid := adapter.NewMiddlewareAdapter(cfg, logger.NewLogger().Logger(), jwtService, redisClient)
 
 	authPermission := []string{
-		"carts:read:all",
-		"carts:write:all",
-		"carts:delete:all",
+		"carts:read:own",
+		"carts:write:own",
+		"carts:update:own",
+		"carts:delete:own",
 	}
 
 	// adminGroup := e.Group("/admin", mid.CheckToken())
-	e.POST("/carts", cartHandler.AddToCart, mid.CheckToken(), mid.RequiredPermission(authPermission...))
-	e.GET("/carts", cartHandler.GetCart, mid.CheckToken(), mid.RequiredPermission(authPermission...))
-	e.DELETE("/carts", cartHandler.RemoveFromCart, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	productGroup := e.Group("/products")
+	productGroup.Use(middlewareGateway.GatewayValidationMiddleware(cfg))
+
+	productGroup.POST("/carts", cartHandler.AddToCart, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	productGroup.GET("/carts", cartHandler.GetCart, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	productGroup.DELETE("/carts", cartHandler.RemoveFromCart, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	productGroup.DELETE("/carts/all", cartHandler.RemoveAllFromCart, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 
 	return cartHandler
 }
@@ -173,9 +180,34 @@ func (ch *cartHandler) RemoveFromCart(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.PRODUCT_ID_INVALID))
 	}
 
-	err = ch.cartService.RemoveFromCart(ctx, jwtUserData.UserID, productId)
-	if err != nil {
+	if err := ch.cartService.RemoveFromCart(ctx, jwtUserData.UserID, productId); err != nil {
 		c.Logger().Errorf("[CartHandler-5] RemoveFromCart: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+	}
+
+	return c.JSON(http.StatusOK, response.ResponseSuccess(nil))
+}
+
+// RemoveAllFromCart implements [CartHandlerInterface].
+func (ch *cartHandler) RemoveAllFromCart(c echo.Context) error {
+	var (
+		ctx         = c.Request().Context()
+		jwtUserData entity.JwtUserData
+	)
+
+	user := c.Get("user").(string)
+	if user == "" {
+		c.Logger().Errorf("[CartHandler-1] RemoveAllFromCart: %v", "data token not found")
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	}
+
+	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
+		c.Logger().Errorf("[CartHandler-2] RemoveAllFromCart: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+	}
+
+	if err := ch.cartService.RemoveAllFromCart(ctx, jwtUserData.UserID); err != nil {
+		c.Logger().Errorf("[CartHandler-3] RemoveAllFromCart: %v", err)
 		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 	}
 

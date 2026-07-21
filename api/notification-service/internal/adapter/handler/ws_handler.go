@@ -3,7 +3,10 @@ package handler
 import (
 	"net/http"
 	"notification-service/config"
+	"notification-service/internal/adapter/handler/response"
+	middlewareGateway "notification-service/internal/middleware"
 	"notification-service/utils"
+	"notification-service/utils/ws"
 	"strconv"
 
 	"github.com/gorilla/websocket"
@@ -18,6 +21,19 @@ type WebSocketHandlerInterface interface {
 type webSocketHandler struct {
 }
 
+func NewWebSocketHandler(e *echo.Echo, cfg *config.Config) WebSocketHandlerInterface {
+	webSocketHandler := &webSocketHandler{}
+
+	e.Use(middleware.Recover())
+
+	notificationGroup := e.Group("/notifications")
+	notificationGroup.Use(middlewareGateway.GatewayValidationMiddleware(cfg))
+
+	notificationGroup.GET("/ws", webSocketHandler.WebSocket)
+
+	return webSocketHandler
+}
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
@@ -28,16 +44,18 @@ func (w *webSocketHandler) WebSocket(c echo.Context) error {
 
 	userId, err := strconv.ParseInt(userIdStr, 10, 64)
 	if err != nil {
-		return c.String(http.StatusBadRequest, utils.INVALID_ID)
+		c.Logger().Errorf("[WebsocketHandler-1] Websocket: %v", err)
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.INVALID_ID))
 	}
 
 	conn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
-		return err
+		c.Logger().Errorf("[WebsocketHandler-1] Websocket: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
 	}
 
-	utils.AddWebSocketConn(userId, conn)
-	defer utils.RemoveWebSocketConn(userId)
+	ws.AddWebSocketConn(userId, conn)
+	defer ws.RemoveWebSocketConn(userId)
 	defer conn.Close()
 
 	for {
@@ -47,13 +65,4 @@ func (w *webSocketHandler) WebSocket(c echo.Context) error {
 	}
 
 	return nil
-}
-
-func NewWebSocketHandler(e *echo.Echo, cfg *config.Config) WebSocketHandlerInterface {
-	webSocketHandler := &webSocketHandler{}
-
-	e.Use(middleware.Recover())
-	e.GET("/ws", webSocketHandler.WebSocket)
-
-	return webSocketHandler
 }

@@ -18,6 +18,8 @@ func SeedPermission(db *gorm.DB) {
 	permission = append(permission, data.ProductPermissions...)
 	permission = append(permission, data.OrderPermissions...)
 	permission = append(permission, data.PaymentPermissions...)
+	permission = append(permission, data.NotificationPermissions...)
+	permission = append(permission, data.CartPermissions...)
 
 	if err := db.Clauses(clause.OnConflict{DoNothing: true}).
 		CreateInBatches(&permission, 100).Error; err != nil {
@@ -26,5 +28,4 @@ func SeedPermission(db *gorm.DB) {
 	}
 
 	log.Printf("All permissions created")
-
 }

@@ -8,6 +8,7 @@ import (
 	"math"
 	"order-service/internal/core/domain/entity"
 	"order-service/utils"
+	"strconv"
 	"strings"
 
 	"github.com/elastic/go-elasticsearch/v7"
@@ -73,8 +74,8 @@ func (e *elasticRepository) SearchOrderElastic(ctx context.Context, queryString 
 
 	defer res.Body.Close()
 
-	if res.IsError() && res.StatusCode == 404 {
-		err := errors.New(utils.DATA_NOT_FOUND)
+	if res.IsError() {
+		err := errors.New(strconv.Itoa(res.StatusCode))
 		e.logger.Errorf("[ElasticRepository-2] SearchOrderElastic: %v", err)
 		return nil, 0, 0, err
 	}
@@ -88,6 +89,12 @@ func (e *elasticRepository) SearchOrderElastic(ctx context.Context, queryString 
 	totalData := int64(0)
 	if hitsTotal, found := result["hits"].(map[string]any)["total"].(map[string]any); found {
 		totalData = int64(hitsTotal["value"].(float64))
+	}
+
+	if totalData <= 0 {
+		err := errors.New(utils.DATA_NOT_FOUND)
+		e.logger.Errorf("[ElasticRepository-4] SearchOrderElastic: %v", err)
+		return nil, 0, 0, err
 	}
 
 	totalPage := int64(0)

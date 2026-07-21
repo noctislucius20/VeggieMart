@@ -18,9 +18,11 @@ type HttpClientInterface interface {
 }
 
 type options struct {
-	timeout int
-	http    *http.Client
-	logger  echo.Logger
+	timeout               int
+	http                  *http.Client
+	logger                echo.Logger
+	internalServiceSecret string
+	internalServiceName   string
 }
 
 // RoundTrip implements [HttpClientInterface].
@@ -61,6 +63,9 @@ func (o *options) CallURL(method string, url string, header map[string]string, p
 		}
 	}
 
+	req.Header.Set("X-Service-Name", o.internalServiceName)
+	req.Header.Set("X-Service-Secret", o.internalServiceSecret)
+
 	resp, err := o.http.Do(req)
 	if err != nil {
 		o.logger.Errorj(log.JSON{
@@ -91,5 +96,8 @@ func (o *options) Connect() {
 func NewHttpClient(cfg *config.Config) HttpClientInterface {
 	opt := new(options)
 	opt.timeout = cfg.App.ServerTimeout
+	opt.internalServiceSecret = cfg.APIInternalService.SecretKey
+	opt.internalServiceName = cfg.APIInternalService.ServiceName
+
 	return opt
 }
