@@ -52,6 +52,7 @@ pipeline {
                     file(credentialsId: 'veggiemart-order-env', variable: 'VMART_ORDER_ENV'),
                     file(credentialsId: 'veggiemart-payment-env', variable: 'VMART_PAYMENT_ENV'),
                     file(credentialsId: 'veggiemart-notification-env', variable: 'VMART_NOTIF_ENV'),
+                    file(credentialsId: 'veggiemart-api-gateway-env', variable: 'VMART_API_GATEWAY_ENV'),
                     file(credentialsId: 'veggiemart-docker-env', variable: 'VMART_DOCKER_ENV')
                 ]) {
 
@@ -61,6 +62,7 @@ pipeline {
                         cp "$VMART_ORDER_ENV" api/order-service/.env
                         cp "$VMART_PAYMENT_ENV" api/payment-service/.env
                         cp "$VMART_NOTIF_ENV" api/notification-service/.env
+                        cp "$VMART_API_GATEWAY_ENV" api/api-gateway/.env
                         cp "$VMART_DOCKER_ENV" api/.env
                     '''
                 }
