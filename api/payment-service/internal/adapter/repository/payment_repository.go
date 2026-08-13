@@ -21,7 +21,7 @@ type PaymentRepositoryInterface interface {
 	UpdateStatusByPaymentId(ctx context.Context, paymentId int64, status string) error
 	UpdatePaymentGatewayByOrderId(ctx context.Context, orderId int64, paymentGatewayId *string, paymentUrl *string) (int64, error)
 	GetAllPayments(ctx context.Context, query entity.QueryStringPayment) ([]entity.PaymentEntity, int64, int64, error)
-	GetPaymentOrderIdByOrderCode(ctx context.Context, orderCode string) (int64, int64, error)
+	GetPaymentOrderIdByOrderCode(ctx context.Context, orderCode string) (int64, int64, int64, error)
 }
 
 type paymentRepository struct {
@@ -56,9 +56,9 @@ func (p *paymentRepository) UpdatePaymentGatewayByOrderId(ctx context.Context, o
 		Where(`"OrderSnapshot"."order_id" = ?`, orderId).
 		Where("payments.payment_status = ?", "PENDING").
 		First(&modelPayment).Error; err != nil {
-		p.logger.Errorf("[PaymentRepository-1] UpdatePaymentGatewayByOrderId: %v", err)
+		p.logger.Errorf("[PaymentRepository] UpdatePaymentGatewayByOrderId: %v", err)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err = errors.New(utils.DATA_NOT_FOUND)
+			err = utils.ErrDataNotFound
 		}
 		return 0, err
 	}
@@ -67,7 +67,7 @@ func (p *paymentRepository) UpdatePaymentGatewayByOrderId(ctx context.Context, o
 	modelPayment.PaymentURL = paymentUrl
 
 	if err := db.WithContext(ctx).Updates(&modelPayment).Error; err != nil {
-		p.logger.Errorf("[PaymentRepository-2] UpdatePaymentGatewayByOrderId: %v", err)
+		p.logger.Errorf("[PaymentRepository] UpdatePaymentGatewayByOrderId: %v", err)
 		return 0, err
 	}
 
@@ -75,25 +75,25 @@ func (p *paymentRepository) UpdatePaymentGatewayByOrderId(ctx context.Context, o
 }
 
 // GetPaymentOrderIdByOrderCode implements [PaymentRepositoryInterface].
-func (p *paymentRepository) GetPaymentOrderIdByOrderCode(ctx context.Context, orderCode string) (int64, int64, error) {
+func (p *paymentRepository) GetPaymentOrderIdByOrderCode(ctx context.Context, orderCode string) (int64, int64, int64, error) {
 	var (
 		db                 = p.getDB(ctx)
 		modelOrderSnapshot model.OrderSnapshot
 	)
 
 	if err := db.WithContext(ctx).
-		Select("id", "payment_id", "order_id").
+		Select("id", "payment_id", "order_id", "customer_id").
 		Where("order_code = ?", orderCode).
 		Order("id DESC").
 		First(&modelOrderSnapshot).Error; err != nil {
-		p.logger.Errorf("[PaymentRepository-1] GetPaymentOrderIdByOrderCode: %v", err)
+		p.logger.Errorf("[PaymentRepository] GetPaymentOrderIdByOrderCode: %v", err)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err = errors.New(utils.DATA_NOT_FOUND)
+			err = utils.ErrDataNotFound
 		}
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 
-	return modelOrderSnapshot.PaymentID, modelOrderSnapshot.OrderID, nil
+	return modelOrderSnapshot.PaymentID, modelOrderSnapshot.OrderID, modelOrderSnapshot.CustomerID, nil
 }
 
 // GetAllPayments implements [PaymentRepositoryInterface].
@@ -118,7 +118,7 @@ func (p *paymentRepository) GetAllPayments(ctx context.Context, query entity.Que
 	}
 
 	if err := sqlMain.Model(&modelPayments).Count(&countData).Error; err != nil {
-		p.logger.Errorf("[PaymentRepository-1] GetAllPayments: %v", err)
+		p.logger.Errorf("[PaymentRepository] GetAllPayments: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -127,7 +127,7 @@ func (p *paymentRepository) GetAllPayments(ctx context.Context, query entity.Que
 		Limit(int(query.Limit)).
 		Offset(int(offset)).
 		Find(&modelPayments).Error; err != nil {
-		p.logger.Errorf("[PaymentRepository-2] GetAllPayments: %v", err)
+		p.logger.Errorf("[PaymentRepository] GetAllPayments: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -137,9 +137,9 @@ func (p *paymentRepository) GetAllPayments(ctx context.Context, query entity.Que
 			UserID:           val.UserID,
 			PaymentMethod:    val.PaymentMethod,
 			PaymentStatus:    val.PaymentStatus,
-			PaymentGatewayID: *val.PaymentGatewayID,
+			PaymentGatewayID: val.PaymentGatewayID,
 			GrossAmount:      val.GrossAmount,
-			PaymentURL:       *val.PaymentURL,
+			PaymentURL:       val.PaymentURL,
 			Order: entity.OrderEntity{
 				ID:           val.OrderSnapshot.OrderID,
 				OrderCode:    val.OrderSnapshot.OrderCode,
@@ -164,13 +164,13 @@ func (p *paymentRepository) UpdateStatusByPaymentId(ctx context.Context, payment
 	tx := db.WithContext(ctx).Updates(&modelPayment)
 
 	if tx.Error != nil {
-		p.logger.Errorf("[PaymentRepository-1] UpdateStatusByPaymentId: %v", tx.Error)
+		p.logger.Errorf("[PaymentRepository] UpdateStatusByPaymentId: %v", tx.Error)
 		return tx.Error
 	}
 
 	if tx.RowsAffected == 0 {
-		err := errors.New(utils.DATA_NOT_FOUND)
-		p.logger.Errorf("[PaymentRepository-2] UpdateStatusByPaymentId: %v", err)
+		err := utils.ErrDataNotFound
+		p.logger.Errorf("[PaymentRepository] UpdateStatusByPaymentId: %v", err)
 		return err
 	}
 
@@ -194,16 +194,18 @@ func (p *paymentRepository) GetPaymentById(ctx context.Context, paymentId int64,
 			return db.Select("id", "payment_id", "order_id", "order_code", "shipping_type", "remarks", "order_datetime", "customer_name", "customer_address", "customer_email")
 		})
 
-	if userId != 0 {
-		sqlMain = sqlMain.Where("user_id = ?", userId)
-	}
-
 	if err := sqlMain.
 		First(&modelPayment, "id = ?", paymentId).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err = errors.New(utils.DATA_NOT_FOUND)
+			err = utils.ErrDataNotFound
 		}
-		p.logger.Errorf("[PaymentRepository-1] GetPaymentById: %v", err)
+		p.logger.Errorf("[PaymentRepository] GetPaymentById: %v", err)
+		return nil, err
+	}
+
+	if userId != 0 && modelPayment.UserID != userId {
+		err := utils.ErrAccessForbidden
+		p.logger.Errorf("[PaymentRepository] GetPaymentById: %v", err)
 		return nil, err
 	}
 
@@ -212,9 +214,9 @@ func (p *paymentRepository) GetPaymentById(ctx context.Context, paymentId int64,
 		UserID:           modelPayment.UserID,
 		PaymentMethod:    modelPayment.PaymentMethod,
 		PaymentStatus:    modelPayment.PaymentStatus,
-		PaymentGatewayID: *modelPayment.PaymentGatewayID,
+		PaymentGatewayID: modelPayment.PaymentGatewayID,
 		GrossAmount:      modelPayment.GrossAmount,
-		PaymentURL:       *modelPayment.PaymentURL,
+		PaymentURL:       modelPayment.PaymentURL,
 		PaymentAt:        modelPayment.CreatedAt.Format("2006-01-02 15:05:05"),
 		Order: entity.OrderEntity{
 			ID:            modelPayment.OrderSnapshot.OrderID,
@@ -258,16 +260,18 @@ func (p *paymentRepository) GetPaymentByOrderId(ctx context.Context, orderId int
 			return db.Select("id", "payment_id", "status")
 		})
 
-	if userId != 0 {
-		sqlMain = sqlMain.Where("user_id = ?", userId)
-	}
-
 	if err := sqlMain.
 		First(&modelPayment).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err = errors.New(utils.DATA_NOT_FOUND)
+			err = utils.ErrDataNotFound
 		}
-		p.logger.Errorf("[PaymentRepository-1] GetPaymentByOrderId: %v", err)
+		p.logger.Errorf("[PaymentRepository] GetPaymentByOrderId: %v", err)
+		return nil, err
+	}
+
+	if userId != 0 && modelPayment.UserID != userId {
+		err := utils.ErrAccessForbidden
+		p.logger.Errorf("[PaymentRepository] GetPaymentByOrderId: %v", err)
 		return nil, err
 	}
 
@@ -276,9 +280,9 @@ func (p *paymentRepository) GetPaymentByOrderId(ctx context.Context, orderId int
 		UserID:           modelPayment.UserID,
 		PaymentMethod:    modelPayment.PaymentMethod,
 		PaymentStatus:    modelPayment.PaymentStatus,
-		PaymentGatewayID: *modelPayment.PaymentGatewayID,
+		PaymentGatewayID: modelPayment.PaymentGatewayID,
 		GrossAmount:      modelPayment.GrossAmount,
-		PaymentURL:       *modelPayment.PaymentURL,
+		PaymentURL:       modelPayment.PaymentURL,
 		PaymentAt:        modelPayment.CreatedAt.Format("2006-01-02 15:05:05"),
 		Order: entity.OrderEntity{
 			ID:            modelPayment.OrderSnapshot.OrderID,
@@ -316,7 +320,7 @@ func (p *paymentRepository) CreatePaymentLog(ctx context.Context, paymentId int6
 	)
 
 	if err := db.WithContext(ctx).Create(&modelPaymentLog).Error; err != nil {
-		p.logger.Errorf("[PaymentRepository-1] CreatePaymentLog: %v", err)
+		p.logger.Errorf("[PaymentRepository] CreatePaymentLog: %v", err)
 		return err
 	}
 
@@ -357,7 +361,7 @@ func (p *paymentRepository) CreatePayment(ctx context.Context, payment *entity.P
 	)
 
 	if err := db.WithContext(ctx).Create(&modelPayment).Error; err != nil {
-		p.logger.Errorf("[PaymentRepository-1] CreatePayment: %v", err)
+		p.logger.Errorf("[PaymentRepository] CreatePayment: %v", err)
 		return 0, "", err
 	}
 

@@ -29,13 +29,13 @@ func RunServer() {
 	cfg := config.NewConfig()
 	db, err := cfg.ConnectionPostgres(serviceCtx)
 	if err != nil {
-		customLogger.Logger().Fatalf("[RunServer-1] %v", err)
+		customLogger.Logger().Fatalf("[RunServer] %v", err)
 		return
 	}
 
 	redisClient, err := cfg.NewRedisClient(serviceCtx)
 	if err != nil {
-		customLogger.Logger().Fatalf("[RunServer-2] %v", err)
+		customLogger.Logger().Fatalf("[RunServer] %v", err)
 		return
 	}
 
@@ -55,7 +55,7 @@ func RunServer() {
 
 	esClient, err := cfg.NewElasticsearchClient()
 	if err != nil {
-		customLogger.Logger().Fatalf("[RunServer-3] %v", err)
+		customLogger.Logger().Fatalf("[RunServer] %v", err)
 		return
 	}
 
@@ -86,7 +86,7 @@ func RunServer() {
 
 		err = e.Start(":" + cfg.App.AppPort)
 		if err != nil {
-			customLogger.Logger().Fatalf("[RunServer-4] %v", err)
+			customLogger.Logger().Fatalf("[RunServer] %v", err)
 			return
 		}
 	}()
@@ -98,7 +98,7 @@ func RunServer() {
 
 	serviceCancel()
 
-	customLogger.Logger().Infof("[RunServer-5] shutting down server on 5 seconds...")
+	customLogger.Logger().Infof("[RunServer] shutting down server on 5 seconds...")
 
 	ctx, cancel := context.WithTimeout(
 		context.Background(),

@@ -39,7 +39,7 @@ func (e *emailAttribute) SendEmailNotification(to string, subject string, body s
 	}
 
 	if err := mailDialer.DialAndSend(mailMessage); err != nil {
-		logger.Errorf("[EmailMessage-1] SendEmailNotification: %v", err)
+		logger.Errorf("[EmailMessage] SendEmailNotification: %v", err)
 		return err
 	}
 

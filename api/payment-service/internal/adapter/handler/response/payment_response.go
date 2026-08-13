@@ -14,7 +14,7 @@ type PaymentDetailResponse struct {
 	OrderCode       string  `json:"order_code"`
 	PaymentMethod   string  `json:"payment_method"`
 	PaymentStatus   string  `json:"payment_status"`
-	PaymentToken    string  `json:"payment_token"`
+	PaymentToken    *string `json:"payment_token"`
 	PaymentURL      string  `json:"payment_url"`
 	GrossAmount     float64 `json:"gross_amount"`
 	ShippingType    string  `json:"shipping_type"`

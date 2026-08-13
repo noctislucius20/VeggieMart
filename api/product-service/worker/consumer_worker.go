@@ -21,13 +21,13 @@ func StartConsumerWorker() {
 
 	conn, err := cfg.NewRabbitMQ()
 	if err != nil {
-		customLogger.Fatalf("[StartConsumerWorker-1] %v", err)
+		customLogger.Fatalf("[StartConsumerWorker] %v", err)
 		return
 	}
 
 	esClient, err := cfg.NewElasticsearchClient()
 	if err != nil {
-		customLogger.Fatalf("[StartConsumerWorker-2] %v", err)
+		customLogger.Fatalf("[StartConsumerWorker] %v", err)
 		return
 	}
 
@@ -54,5 +54,5 @@ func StartConsumerWorker() {
 
 	wg.Wait()
 
-	customLogger.Infof("[StartConsumerWorker-3] shutting down consumer worker...")
+	customLogger.Infof("[StartConsumerWorker] shutting down consumer worker...")
 }

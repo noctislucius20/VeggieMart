@@ -15,7 +15,7 @@ func (cfg Config) NewElasticsearchClient() (*elasticsearch.Client, error) {
 
 	es, err := elasticsearch.NewClient(configElastic)
 	if err != nil {
-		log.Errorf("[NewElasticsearchClient-1] failed to initialize elasticsearch: %v", err)
+		log.Errorf("[NewElasticsearchClient] failed to initialize elasticsearch: %v", err)
 		return nil, err
 	}
 

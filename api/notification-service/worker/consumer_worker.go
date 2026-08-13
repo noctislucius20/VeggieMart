@@ -6,6 +6,7 @@ import (
 	"notification-service/internal/adapter/message"
 	"notification-service/internal/adapter/message/consumer"
 	"notification-service/internal/adapter/repository"
+	"notification-service/internal/adapter/repository/cache"
 	"notification-service/internal/core/service"
 	"notification-service/utils"
 	"notification-service/utils/logger"
@@ -25,19 +26,19 @@ func StartConsumerWorker() {
 
 	conn, err := cfg.NewRabbitMQ()
 	if err != nil {
-		customLogger.Fatalf("[StartConsumerWorker-1] %v", err)
+		customLogger.Fatalf("[StartConsumerWorker] %v", err)
 		return
 	}
 
 	db, err := cfg.ConnectionPostgres(ctx)
 	if err != nil {
-		customLogger.Fatalf("[StartConsumerWorker-2] %v", err)
+		customLogger.Fatalf("[StartConsumerWorker] %v", err)
 		return
 	}
 
 	redisClient, err := cfg.NewRedisClient(ctx)
 	if err != nil {
-		customLogger.Fatalf("[StartConsumerWorker-3] %v", err)
+		customLogger.Fatalf("[StartConsumerWorker] %v", err)
 		return
 	}
 
@@ -45,8 +46,10 @@ func StartConsumerWorker() {
 
 	txManager := repository.NewGormTransactionManager(db.DB)
 
+	cacheNotification := cache.NewNotificationCache(redisClient, customLogger)
+
 	emailService := message.NewEmailMessage(cfg)
-	notificationService := service.NewNotificationService(notificationRepo, txManager, db.DB, customLogger)
+	notificationService := service.NewNotificationService(notificationRepo, cacheNotification, txManager, db.DB, customLogger)
 
 	consumerWorker := consumer.NewNotificationConsumerWorker(emailService, notificationRepo, txManager, notificationService, conn, db.DB, redisClient, customLogger)
 
@@ -81,5 +84,5 @@ func StartConsumerWorker() {
 
 	conn.Close()
 
-	customLogger.Infof("[StartConsumerWorker-3] shutting down consumer worker...")
+	customLogger.Infof("[StartConsumerWorker] shutting down consumer worker...")
 }

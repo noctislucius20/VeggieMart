@@ -47,11 +47,12 @@ type Elasticsearch struct {
 }
 
 type PublisherName struct {
-	OrderCreate            string `json:"order_create"`
-	EmailUpdateOrderStatus string `json:"email_update_order_status"`
-	OrderPaymentSuccess    string `json:"order_payment_success"`
-	OrderUpdateStatus      string `json:"order_update_status"`
-	OrderPaymentCreate     string `json:"order_payment_create"`
+	OrderCreate              string `json:"order_create"`
+	EmailUpdateOrderStatus   string `json:"email_update_order_status"`
+	OrderPaymentSuccess      string `json:"order_payment_success"`
+	ElasticOrderUpdateStatus string `json:"elastic_order_update_status"`
+	DbOrderUpdateStatus      string `json:"db_order_update_status"`
+	OrderPaymentCreate       string `json:"order_payment_create"`
 }
 
 type APIGateway struct {
@@ -118,11 +119,12 @@ func NewConfig() *Config {
 			Port: viper.GetString("ELASTICSEARCH_PORT"),
 		},
 		PublisherName: PublisherName{
-			OrderCreate:            viper.GetString("ORDER_CREATE"),
-			EmailUpdateOrderStatus: viper.GetString("EMAIL_UPDATE_ORDER_STATUS"),
-			OrderPaymentSuccess:    viper.GetString("ORDER_PAYMENT_SUCCESS"),
-			OrderUpdateStatus:      viper.GetString("ORDER_UPDATE_STATUS"),
-			OrderPaymentCreate:     viper.GetString("ORDER_PAYMENT_CREATE"),
+			OrderCreate:              viper.GetString("ORDER_CREATE"),
+			EmailUpdateOrderStatus:   viper.GetString("EMAIL_UPDATE_ORDER_STATUS"),
+			OrderPaymentSuccess:      viper.GetString("ORDER_PAYMENT_SUCCESS"),
+			ElasticOrderUpdateStatus: viper.GetString("ELASTIC_ORDER_UPDATE_STATUS"),
+			DbOrderUpdateStatus:      viper.GetString("DB_ORDER_UPDATE_STATUS"),
+			OrderPaymentCreate:       viper.GetString("ORDER_PAYMENT_CREATE"),
 		},
 		APIGateway: APIGateway{
 			RequestAPI: viper.GetString("GATEWAY_REQUEST_API"),

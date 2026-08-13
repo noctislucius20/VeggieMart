@@ -5,6 +5,7 @@ import (
 	"notification-service/config"
 	"notification-service/internal/adapter/handler"
 	"notification-service/internal/adapter/repository"
+	"notification-service/internal/adapter/repository/cache"
 	"notification-service/internal/core/service"
 	"notification-service/utils/logger"
 	"notification-service/utils/ws"
@@ -27,13 +28,13 @@ func RunServer() {
 
 	db, err := cfg.ConnectionPostgres(serviceCtx)
 	if err != nil {
-		customLogger.Logger().Fatalf("[RunServer-1] %v", err)
+		customLogger.Logger().Fatalf("[RunServer] %v", err)
 		return
 	}
 
 	redisClient, err := cfg.NewRedisClient(serviceCtx)
 	if err != nil {
-		customLogger.Logger().Fatalf("[RunServer-2] %v", err)
+		customLogger.Logger().Fatalf("[RunServer] %v", err)
 		return
 	}
 
@@ -49,13 +50,16 @@ func RunServer() {
 
 	notificationRepo := repository.NewNotificationRepository(db.DB, customLogger.Logger())
 
+	cacheNotification := cache.NewNotificationCache(redisClient, customLogger.Logger())
+
 	jwtService := service.NewJwtService(cfg)
-	notificationService := service.NewNotificationService(notificationRepo, txManager, db.DB, customLogger.Logger())
+	notificationService := service.NewNotificationService(notificationRepo, cacheNotification, txManager, db.DB, customLogger.Logger())
 
 	handler.NewNotificationHandler(e, cfg, notificationService, jwtService, redisClient)
-	handler.NewWebSocketHandler(e, cfg)
+	handler.NewWebSocketHandler(e, cfg, jwtService, redisClient, customLogger.Logger())
 
 	go ws.SubscribeWebSocketChannel(serviceCtx, redisClient, notificationService, customLogger.Logger())
+	go ws.SubscribeAdminWebSocketChannel(serviceCtx, redisClient, customLogger.Logger())
 
 	e.GET("/api/check", func(c echo.Context) error {
 		return c.String(200, "OK")
@@ -68,7 +72,7 @@ func RunServer() {
 
 		err := e.Start(":" + cfg.App.AppPort)
 		if err != nil {
-			customLogger.Logger().Fatalf("[RunServer-3] %v", err)
+			customLogger.Logger().Fatalf("[RunServer] %v", err)
 			return
 		}
 	}()
@@ -78,7 +82,7 @@ func RunServer() {
 
 	<-quit
 
-	customLogger.Logger().Infof("[RunServer-4] shutting down server on 5 seconds...")
+	customLogger.Logger().Infof("[RunServer] shutting down server on 5 seconds...")
 
 	serviceCancel()
 

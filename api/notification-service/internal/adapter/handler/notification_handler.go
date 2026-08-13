@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"notification-service/config"
 	"notification-service/internal/adapter"
@@ -39,7 +40,7 @@ func NewNotificationHandler(e *echo.Echo, cfg *config.Config, notificationServic
 
 	e.Use(middleware.Recover())
 	e.Use(middleware.ContextTimeoutWithConfig(middleware.ContextTimeoutConfig{
-		Timeout: 10 * time.Second,
+		Timeout: 100 * time.Second,
 	}))
 
 	mid := adapter.NewMiddlewareAdapter(cfg, logger.NewLogger().Logger(), jwtService, redisClient)
@@ -51,14 +52,14 @@ func NewNotificationHandler(e *echo.Echo, cfg *config.Config, notificationServic
 		"notifications:delete:own",
 	}
 
-	notificationGroup := e.Group("/notifications")
-	notificationGroup.Use(middlewareGateway.GatewayValidationMiddleware(cfg))
+	authNotificationGroup := e.Group("/notifications", mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	authNotificationGroup.Use(middlewareGateway.GatewayValidationMiddleware(cfg))
 
-	notificationGroup.GET("", notificationHandler.GetAllNotifications, mid.CheckToken(), mid.RequiredPermission(authPermission...))
-	notificationGroup.GET("/push", notificationHandler.GetAllPushNotification, mid.CheckToken(), mid.RequiredPermission(authPermission...))
-	notificationGroup.GET("/:id", notificationHandler.GetNotificationById, mid.CheckToken(), mid.RequiredPermission(authPermission...))
-	notificationGroup.PUT("/:id/read", notificationHandler.MarkAsReadNotification, mid.CheckToken(), mid.RequiredPermission(authPermission...))
-	notificationGroup.PUT("/:id/sent", notificationHandler.MarkAsSentNotification, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	authNotificationGroup.GET("", notificationHandler.GetAllNotifications)
+	authNotificationGroup.GET("/push", notificationHandler.GetAllPushNotification)
+	authNotificationGroup.GET("/:id", notificationHandler.GetNotificationById)
+	authNotificationGroup.PUT("/:id/read", notificationHandler.MarkAsReadNotification)
+	authNotificationGroup.PUT("/:id/sent", notificationHandler.MarkAsSentNotification)
 
 	return &notificationHandler
 }
@@ -71,18 +72,16 @@ func (n *notificationHandler) GetAllPushNotification(c echo.Context) error {
 		jwtUserData       = entity.JwtUserData{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[NotificationHandler-1] GetAllPushNotification: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[NotificationHandler] GetAllPushNotification: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
-		c.Logger().Errorf("[NotificationHandler-2] GetAllPushNotification: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[NotificationHandler] GetAllPushNotification: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
-
-	userId := jwtUserData.UserID
 
 	search := c.QueryParam("search")
 
@@ -103,13 +102,13 @@ func (n *notificationHandler) GetAllPushNotification(c echo.Context) error {
 
 	page, err := conv.ParseInt64QueryParam(c, "page", 1)
 	if err != nil {
-		c.Logger().Errorf("[NotificationHandler-3] GetAllPushNotification: %v", err)
+		c.Logger().Errorf("[NotificationHandler] GetAllPushNotification: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	limit, err := conv.ParseInt64QueryParam(c, "limit", 5)
 	if err != nil {
-		c.Logger().Errorf("[NotificationHandler-4] GetAllPushNotification: %v", err)
+		c.Logger().Errorf("[NotificationHandler] GetAllPushNotification: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -120,25 +119,26 @@ func (n *notificationHandler) GetAllPushNotification(c echo.Context) error {
 		Status:    status,
 		Page:      page,
 		Limit:     limit,
-		UserID:    userId,
 		OrderBy:   orderBy,
 		OrderType: orderType,
 		IsRead:    isRead,
 	}
 
-	results, countData, totalPages, err := n.notificationService.GetAllPushNotification(ctx, reqEntity)
+	results, countData, totalPages, err := n.notificationService.GetAllPushNotification(ctx, reqEntity, jwtUserData)
 	if err != nil {
-		c.Logger().Errorf("[NotificationHandler-5] GetAllPushNotification: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[NotificationHandler] GetAllPushNotification: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	for _, result := range results {
 		respNotifications = append(respNotifications, response.NotificationResponseList{
-			ID:      result.ID,
-			Subject: *result.Subject,
-			Message: result.Message,
-			Status:  result.Status,
-			SentAt:  result.SentAt.Format("2006-01-02 15:04:05"),
+			ID:                 result.ID,
+			NotificationType:   result.NotificationType,
+			NotificationTypeID: result.NotificationTypeID,
+			Subject:            *result.Subject,
+			Message:            result.Message,
+			Status:             result.Status,
+			SentAt:             result.SentAt.Format("2006-01-02 15:04:05"),
 		})
 	}
 
@@ -158,30 +158,30 @@ func (n *notificationHandler) MarkAsSentNotification(c echo.Context) error {
 		ctx = c.Request().Context()
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[NotificationHandler-1] MarkAsSentNotification: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[NotificationHandler] MarkAsSentNotification: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[NotificationHandler-2] MarkAsSentNotification: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id required"))
+		c.Logger().Errorf("[NotificationHandler] MarkAsSentNotification: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[NotificationHandler-3] MarkAsSentNotification: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.INVALID_ID))
+		c.Logger().Errorf("[NotificationHandler] MarkAsSentNotification: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	if err := n.notificationService.MarkAsSentNotification(ctx, int64(id)); err != nil {
-		c.Logger().Errorf("[NotificationHandler-4] MarkAsSentNotification: %v", err)
-		if err.Error() == utils.DATA_NOT_FOUND {
-			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.DATA_NOT_FOUND))
+		c.Logger().Errorf("[NotificationHandler] MarkAsSentNotification: %v", err)
+		if errors.Is(err, utils.ErrDataNotFound) {
+			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.ErrDataNotFound.Error()))
 		}
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	return c.JSON(http.StatusOK, response.ResponseSuccess(nil))
@@ -193,30 +193,30 @@ func (n *notificationHandler) MarkAsReadNotification(c echo.Context) error {
 		ctx = c.Request().Context()
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[NotificationHandler-1] MarkAsReadNotification: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[NotificationHandler] MarkAsReadNotification: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[NotificationHandler-2] MarkAsReadNotification: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id required"))
+		c.Logger().Errorf("[NotificationHandler] MarkAsReadNotification: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[NotificationHandler-3] MarkAsReadNotification: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.INVALID_ID))
+		c.Logger().Errorf("[NotificationHandler] MarkAsReadNotification: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	if err := n.notificationService.MarkAsReadNotification(ctx, int64(id)); err != nil {
-		c.Logger().Errorf("[NotificationHandler-4] MarkAsReadNotification: %v", err)
-		if err.Error() == utils.DATA_NOT_FOUND {
-			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.DATA_NOT_FOUND))
+		c.Logger().Errorf("[NotificationHandler] MarkAsReadNotification: %v", err)
+		if errors.Is(err, utils.ErrDataNotFound) {
+			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.ErrDataNotFound.Error()))
 		}
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	return c.JSON(http.StatusOK, response.ResponseSuccess(nil))
@@ -229,41 +229,41 @@ func (n *notificationHandler) GetNotificationById(c echo.Context) error {
 		respNotification = response.NotificationDetailResponse{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[NotificationHandler-1] GetNotificationById: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[NotificationHandler] GetNotificationById: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[NotificationHandler-2] GetNotificationById: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id required"))
+		c.Logger().Errorf("[NotificationHandler] GetNotificationById: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[NotificationHandler-3] GetNotificationById: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id invalid"))
+		c.Logger().Errorf("[NotificationHandler] GetNotificationById: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	result, err := n.notificationService.GetNotificationById(ctx, int64(id))
 	if err != nil {
-		c.Logger().Errorf("[NotificationHandler-4] GetNotificationById: %v", err)
-		if err.Error() == utils.DATA_NOT_FOUND {
+		c.Logger().Errorf("[NotificationHandler] GetNotificationById: %v", err)
+		if errors.Is(err, utils.ErrDataNotFound) {
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
 		}
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	respNotification = response.NotificationDetailResponse{
-		ID:               result.ID,
-		Subject:          *result.Subject,
-		Message:          result.Message,
-		Status:           result.Status,
-		SentAt:           result.SentAt.Format("2006-01-02 15:04:05"),
-		ReadAt:           result.ReadAt.Format("2006-01-02 15:04:05"),
-		NotificationType: result.NotificationType,
+		ID:                 result.ID,
+		Subject:            *result.Subject,
+		Message:            result.Message,
+		Status:             result.Status,
+		SentAt:             result.SentAt.Format("2006-01-02 15:04:05"),
+		ReadAt:             result.ReadAt.Format("2006-01-02 15:04:05"),
+		NotificationMethod: result.NotificationMethod,
 	}
 
 	return c.JSON(http.StatusOK, response.ResponseSuccess(respNotification))
@@ -277,15 +277,15 @@ func (n *notificationHandler) GetAllNotifications(c echo.Context) error {
 		jwtUserData       = entity.JwtUserData{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[NotificationHandler-1] GetAllNotifications: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[NotificationHandler] GetAllNotifications: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
-		c.Logger().Errorf("[NotificationHandler-2] GetAllNotifications: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[NotificationHandler] GetAllNotifications: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	userId := jwtUserData.UserID
@@ -309,13 +309,13 @@ func (n *notificationHandler) GetAllNotifications(c echo.Context) error {
 
 	page, err := conv.ParseInt64QueryParam(c, "page", 1)
 	if err != nil {
-		c.Logger().Errorf("[NotificationHandler-3] GetAllNotifications: %v", err)
+		c.Logger().Errorf("[NotificationHandler] GetAllNotifications: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
-	limit, err := conv.ParseInt64QueryParam(c, "limit", 10)
+	limit, err := conv.ParseInt64QueryParam(c, "limit", 5)
 	if err != nil {
-		c.Logger().Errorf("[NotificationHandler-4] GetAllNotifications: %v", err)
+		c.Logger().Errorf("[NotificationHandler] GetAllNotifications: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -334,8 +334,8 @@ func (n *notificationHandler) GetAllNotifications(c echo.Context) error {
 
 	results, countData, totalPages, err := n.notificationService.GetAllNotifications(ctx, reqEntity)
 	if err != nil {
-		c.Logger().Errorf("[NotificationHandler-5] GetAllNotifications: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[NotificationHandler] GetAllNotifications: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	for _, result := range results {

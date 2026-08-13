@@ -29,15 +29,15 @@ func GatewayValidationMiddleware(cfg *config.Config) echo.MiddlewareFunc {
 
 			gatewayHeader := c.Request().Header.Get("X-API-Gateway")
 			if gatewayHeader != "true" {
-				c.Logger().Errorf("[GatewayMiddleware-1] GatewayValidationMiddleware: %v", utils.GATEWAY_REQUIRED)
-				return c.JSON(http.StatusForbidden, response.ResponseFailed(utils.GATEWAY_REQUIRED))
+				c.Logger().Errorf("[GatewayMiddleware] GatewayValidationMiddleware: %v", utils.ErrGatewayRequired.Error())
+				return c.JSON(http.StatusForbidden, response.ResponseFailed(utils.ErrGatewayRequired.Error()))
 			}
 
 			if expectedGateway != "" {
 				receivedSecret := c.Request().Header.Get("X-Gateway-Secret")
 				if receivedSecret != expectedGateway {
-					c.Logger().Errorf("[GatewayMiddleware-2] GatewayValidationMiddleware: %v", utils.GATEWAY_SECRET_INVALID)
-					return c.JSON(http.StatusForbidden, response.ResponseFailed(utils.GATEWAY_SECRET_INVALID))
+					c.Logger().Errorf("[GatewayMiddleware] GatewayValidationMiddleware: %v", utils.ErrGatewaySecretInvalid.Error())
+					return c.JSON(http.StatusForbidden, response.ResponseFailed(utils.ErrGatewaySecretInvalid.Error()))
 				}
 			}
 

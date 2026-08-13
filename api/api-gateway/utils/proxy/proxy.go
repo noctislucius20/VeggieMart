@@ -6,9 +6,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -17,28 +15,6 @@ func ForwardRequest(c echo.Context, targetUrl string) error {
 	target, err := url.Parse(targetUrl)
 	if err != nil {
 		return c.JSON(http.StatusBadGateway, response.ResponseFailed("invalid target url"))
-	}
-
-	if strings.ToLower(c.Request().Header.Get("Upgrade")) == "websocket" {
-		proxy := &httputil.ReverseProxy{
-			Rewrite: func(pr *httputil.ProxyRequest) {
-				// 1. Ini pengganti fungsi originalDirector(), otomatis mengarahkan ke target URL
-				// pr.SetURL(target)
-
-				pr.Out.URL = target
-				pr.Out.URL.RawQuery = pr.In.URL.RawQuery
-				// 2. Pertahankan header Upgrade & Connection dari client asli (pr.In) ke request backend (pr.Out)
-				pr.Out.Header.Set("Connection", pr.In.Header.Get("Connection"))
-				pr.Out.Header.Set("Upgrade", pr.In.Header.Get("Upgrade"))
-
-				// 3. Tambahkan Custom Gateway Header ke pr.Out
-				// helper.SetGatewayHeaders(c, pr.Out)
-			},
-		}
-
-		// Jalankan proxy WebSocket, lalu langsung return nil (selesai)
-		proxy.ServeHTTP(c.Response().Writer, c.Request())
-		return nil
 	}
 
 	body, err := io.ReadAll(c.Request().Body)

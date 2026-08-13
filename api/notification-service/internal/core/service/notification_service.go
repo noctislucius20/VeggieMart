@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"notification-service/internal/adapter/repository"
+	"notification-service/internal/adapter/repository/cache"
 	"notification-service/internal/core/domain/entity"
 	"notification-service/internal/core/service/transaction"
+	"strings"
 
 	"github.com/labstack/gommon/log"
 	"gorm.io/gorm"
@@ -12,32 +14,32 @@ import (
 
 type NotificationServiceInterface interface {
 	GetAllNotifications(ctx context.Context, query entity.NotificationQueryString) ([]entity.NotificationEntity, int64, int64, error)
-	GetAllPushNotification(ctx context.Context, query entity.NotificationQueryString) ([]entity.NotificationEntity, int64, int64, error)
+	GetAllPushNotification(ctx context.Context, query entity.NotificationQueryString, jwtUserData entity.JwtUserData) ([]entity.NotificationEntity, int64, int64, error)
 	GetNotificationById(ctx context.Context, notificationId int64) (*entity.NotificationEntity, error)
 	MarkAsSentNotification(ctx context.Context, notificationId int64) error
 	MarkAsReadNotification(ctx context.Context, notificationId int64) error
 }
 
 type notificationService struct {
-	repo      repository.NotificationRepositoryInterface
-	db        *gorm.DB
-	txManager transaction.TransactionManager
-	logger    *log.Logger
+	repo              repository.NotificationRepositoryInterface
+	db                *gorm.DB
+	cacheNotification cache.NotificationCacheInterface
+	txManager         transaction.TransactionManager
+	logger            *log.Logger
 }
 
-func NewNotificationService(repo repository.NotificationRepositoryInterface, txManager transaction.TransactionManager, db *gorm.DB, logger *log.Logger) NotificationServiceInterface {
+func NewNotificationService(repo repository.NotificationRepositoryInterface, cacheNotification cache.NotificationCacheInterface, txManager transaction.TransactionManager, db *gorm.DB, logger *log.Logger) NotificationServiceInterface {
 	return &notificationService{
-		repo:      repo,
-		txManager: txManager,
-		db:        db,
-		logger:    logger,
+		cacheNotification: cacheNotification,
+		repo:              repo,
+		txManager:         txManager,
+		db:                db,
+		logger:            logger,
 	}
 }
 
-// TODO add cache notification
-
 // GetAllPushNotification implements [NotificationServiceInterface].
-func (n *notificationService) GetAllPushNotification(ctx context.Context, query entity.NotificationQueryString) ([]entity.NotificationEntity, int64, int64, error) {
+func (n *notificationService) GetAllPushNotification(ctx context.Context, query entity.NotificationQueryString, jwtUserData entity.JwtUserData) ([]entity.NotificationEntity, int64, int64, error) {
 	var (
 		notifications []entity.NotificationEntity
 		countData     int64
@@ -45,9 +47,21 @@ func (n *notificationService) GetAllPushNotification(ctx context.Context, query 
 	)
 
 	if err := n.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		roleEntity, err := n.cacheNotification.GetRoleById(txCtx, jwtUserData.RoleID)
+		if err != nil {
+			return err
+		}
+
+		switch strings.ToLower(roleEntity.Name) {
+		case "customer":
+			query.UserID = jwtUserData.UserID
+		default:
+			query.UserID = 0
+		}
+
 		notificationEntities, count, pages, err := n.repo.GetAllPushNotification(txCtx, query)
 		if err != nil {
-			return nil
+			return err
 		}
 
 		if len(notificationEntities) == 0 {
@@ -62,7 +76,7 @@ func (n *notificationService) GetAllPushNotification(ctx context.Context, query 
 
 		return nil
 	}); err != nil {
-		n.logger.Errorf("[NotificationService-1] GetAllPushNotification: %v", err)
+		n.logger.Errorf("[NotificationService] GetAllPushNotification: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -82,7 +96,7 @@ func (n *notificationService) MarkAsReadNotification(ctx context.Context, notifi
 
 		return nil
 	}); err != nil {
-		n.logger.Errorf("[NotificationService-1] MarkAsReadNotification: %v", err)
+		n.logger.Errorf("[NotificationService] MarkAsReadNotification: %v", err)
 		return err
 	}
 
@@ -98,7 +112,7 @@ func (n *notificationService) MarkAsSentNotification(ctx context.Context, notifi
 
 		return nil
 	}); err != nil {
-		n.logger.Errorf("[NotificationService-1] MarkAsSentNotification: %v", err)
+		n.logger.Errorf("[NotificationService] MarkAsSentNotification: %v", err)
 		return err
 	}
 
@@ -119,7 +133,7 @@ func (n *notificationService) GetNotificationById(ctx context.Context, notificat
 
 		return nil
 	}); err != nil {
-		n.logger.Errorf("[NotificationService-1] GetNotificationById: %v", err)
+		n.logger.Errorf("[NotificationService] GetNotificationById: %v", err)
 		return nil, err
 	}
 
@@ -152,7 +166,7 @@ func (n *notificationService) GetAllNotifications(ctx context.Context, query ent
 
 		return nil
 	}); err != nil {
-		n.logger.Errorf("[NotificationService-1] GetAllNotifications: %v", err)
+		n.logger.Errorf("[NotificationService] GetAllNotifications: %v", err)
 		return nil, 0, 0, err
 	}
 

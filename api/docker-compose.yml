@@ -350,6 +350,35 @@ services:
       - rabbitmq-net
       - elasticsearch-net
 
+  payment-consumer-worker:
+    build: 
+      context: ./payment-service
+      dockerfile: Dockerfile
+    env_file:
+      - ./payment-service/.env
+    command: ["./app", "consumer-worker"]
+    restart: unless-stopped
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+    networks:
+      - payment-db-net
+      - redis-net
+      - rabbitmq-net
+      - elasticsearch-net
+
   notification-db:
     image: postgres:18
     environment:
@@ -425,7 +454,7 @@ services:
       context: ./api-gateway
       dockerfile: Dockerfile
     env_file:
-      - ./notification-service/.env
+      - ./api-gateway/.env
     ports:
       - "8000:8000"
     restart: unless-stopped

@@ -62,7 +62,7 @@ func (c *categoryRepository) GetBatchCategories(ctx context.Context, categoryIds
 			Select("id", "name", "slug").
 			Where("id IN ?", categoryIds[i:end]).
 			Find(&batchCategories).Error; err != nil {
-			c.logger.Errorf("[CategoryRepository-1] GetBatchCategories: %v", err)
+			c.logger.Errorf("[CategoryRepository] GetBatchCategories: %v", err)
 			return nil, err
 		}
 
@@ -70,8 +70,8 @@ func (c *categoryRepository) GetBatchCategories(ctx context.Context, categoryIds
 	}
 
 	if len(modelCategories) == 0 {
-		err := errors.New(utils.DATA_NOT_FOUND)
-		c.logger.Errorf("[CategoryRepository-2] GetBatchCategories: %v", err)
+		err := utils.ErrDataNotFound
+		c.logger.Errorf("[CategoryRepository] GetBatchCategories: %v", err)
 		return nil, err
 	}
 
@@ -99,7 +99,7 @@ func (c *categoryRepository) GetAllPublishedCategories(ctx context.Context) ([]e
 		Where("status = ?", true).
 		Order("COALESCE(parent_id, id), parent_id IS NOT NULL, id").
 		Find(&modelCategories).Error; err != nil {
-		c.logger.Errorf("[CategoryRepository-1] GetAllPublishedCategories: %v", err)
+		c.logger.Errorf("[CategoryRepository] GetAllPublishedCategories: %v", err)
 		return nil, err
 	}
 
@@ -137,18 +137,18 @@ func (c *categoryRepository) DeleteCategory(ctx context.Context, categoryId int6
 		Where("products.deleted_at IS NULL").
 		Find(&categoryDeleteDTO).
 		Limit(1).Error; err != nil {
-		c.logger.Errorf("[CategoryRepository-1] DeleteCategory: %v", err)
+		c.logger.Errorf("[CategoryRepository] DeleteCategory: %v", err)
 		return err
 	}
 
 	if categoryDeleteDTO.ProductID > 0 {
-		err := errors.New(utils.DATA_STILL_IN_USED)
-		c.logger.Errorf("[CategoryRepository-2] DeleteCategory: %v", err)
+		err := utils.ErrDataStillInUsed
+		c.logger.Errorf("[CategoryRepository] DeleteCategory: %v", err)
 		return err
 	}
 
 	if err := db.WithContext(ctx).Delete(&modelCategory).Error; err != nil {
-		c.logger.Errorf("[CategoryRepository-3] DeleteCategory: %v", err)
+		c.logger.Errorf("[CategoryRepository] DeleteCategory: %v", err)
 		return err
 	}
 
@@ -172,17 +172,17 @@ func (c *categoryRepository) UpdateCategory(ctx context.Context, req entity.Cate
 
 	tx := db.WithContext(ctx).Updates(&modelCategory)
 	if tx.Error != nil {
-		c.logger.Errorf("[CategoryRepository-1] UpdateCategory: %v", tx.Error)
+		c.logger.Errorf("[CategoryRepository] UpdateCategory: %v", tx.Error)
 		if strings.Contains(tx.Error.Error(), "duplicate key") {
-			err := errors.New(utils.DATA_ALREADY_EXISTS)
+			err := utils.ErrDataAlreadyExists
 			return err
 		}
 		return tx.Error
 	}
 
 	if tx.RowsAffected == 0 {
-		err := errors.New(utils.DATA_NOT_FOUND)
-		c.logger.Errorf("[CategoryRepository-2] UpdateCategory: %v", err)
+		err := utils.ErrDataNotFound
+		c.logger.Errorf("[CategoryRepository] UpdateCategory: %v", err)
 		return err
 	}
 
@@ -204,9 +204,9 @@ func (c *categoryRepository) CreateCategory(ctx context.Context, req entity.Cate
 	)
 
 	if err := db.WithContext(ctx).Create(&modelCategory).Error; err != nil {
-		c.logger.Errorf("[CategoryRepository-1] CreateCategory: %v", err)
+		c.logger.Errorf("[CategoryRepository] CreateCategory: %v", err)
 		if strings.Contains(err.Error(), "duplicate key") {
-			err := errors.New(utils.DATA_ALREADY_EXISTS)
+			err := utils.ErrDataAlreadyExists
 			return 0, err
 		}
 		return 0, err
@@ -227,11 +227,11 @@ func (c *categoryRepository) GetCategoryByIdOrSlug(ctx context.Context, id int64
 		Omit("created_at", "updated_at", "deleted_at").
 		First(&modelCategory, "id = ? OR slug = ?", id, slug).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err = errors.New(utils.DATA_NOT_FOUND)
-			c.logger.Errorf("[CategoryRepository-1] GetCategoryByIdOrSlug: %v", err)
+			err = utils.ErrDataNotFound
+			c.logger.Errorf("[CategoryRepository] GetCategoryByIdOrSlug: %v", err)
 			return nil, err
 		}
-		c.logger.Errorf("[CategoryRepository-2] GetCategoryByIdOrSlug: %v", err)
+		c.logger.Errorf("[CategoryRepository] GetCategoryByIdOrSlug: %v", err)
 		return nil, err
 	}
 
@@ -266,9 +266,14 @@ func (c *categoryRepository) GetAllCategories(ctx context.Context, query entity.
 	sqlMain := db.WithContext(ctx).Preload("Products").
 		Where("name ILIKE ? OR slug ILIKE ?", "%"+query.Search+"%", "%"+query.Search+"%")
 
+	if query.Status != "" {
+		statusBool := strings.ToLower(query.Status) == "published"
+		sqlMain = sqlMain.Where("status = ?", statusBool)
+	}
+
 	if err := sqlMain.Model(&modelCategories).
 		Count(&countData).Error; err != nil {
-		c.logger.Errorf("[CategoryRepository-1] GetAllCategories: %v", err)
+		c.logger.Errorf("[CategoryRepository] GetAllCategories: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -277,7 +282,7 @@ func (c *categoryRepository) GetAllCategories(ctx context.Context, query entity.
 		Limit(int(query.Limit)).
 		Offset(int(offset)).
 		Find(&modelCategories).Error; err != nil {
-		c.logger.Errorf("[CategoryRepository-2] GetAllCategories: %v", err)
+		c.logger.Errorf("[CategoryRepository] GetAllCategories: %v", err)
 		return nil, 0, 0, err
 	}
 

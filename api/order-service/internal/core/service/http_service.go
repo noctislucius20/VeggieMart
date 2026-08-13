@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"order-service/config"
@@ -54,9 +53,9 @@ func (h *httpService) HttpUpdateStockProductsService(products []entity.OrderItem
 	if productsFetch.StatusCode != 200 {
 		switch productsFetch.StatusCode {
 		case 409:
-			return errors.New(utils.STOCK_UNAVAILABLE)
+			return utils.ErrStockUnavailable
 		default:
-			return errors.New(utils.INTERNAL_SERVER_ERROR)
+			return utils.ErrInternalServerError
 		}
 	}
 
@@ -85,10 +84,10 @@ func (h *httpService) HttpUserByIdService(userData string) (*entity.UserResponse
 	if userFetch.StatusCode != 200 {
 		switch userFetch.StatusCode {
 		case 404:
-			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+			err := utils.ErrRelationDataNotFound
 			return nil, err
 		default:
-			err := errors.New(utils.INTERNAL_SERVER_ERROR)
+			err := utils.ErrInternalServerError
 			return nil, err
 		}
 	}
@@ -131,9 +130,9 @@ func (h *httpService) HttpGetProductsService(productIds []int64, userData string
 	if productsFetch.StatusCode != 200 {
 		switch productsFetch.StatusCode {
 		case 404:
-			return nil, errors.New(utils.RELATION_DATA_NOT_FOUND)
+			return nil, utils.ErrRelationDataNotFound
 		default:
-			return nil, errors.New(utils.INTERNAL_SERVER_ERROR)
+			return nil, utils.ErrInternalServerError
 		}
 	}
 

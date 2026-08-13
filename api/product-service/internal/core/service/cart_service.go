@@ -43,7 +43,7 @@ func (c *cartService) GetCart(ctx context.Context, userId int64) ([]entity.CartI
 
 	cartEntities, err := c.cartRepo.GetCart(ctx, userId)
 	if err != nil {
-		c.logger.Errorf("[CartService-1] GetCart: %v", err)
+		c.logger.Errorf("[CartService] GetCart: %v", err)
 		return nil, err
 	}
 
@@ -57,7 +57,7 @@ func (c *cartService) GetCart(ctx context.Context, userId int64) ([]entity.CartI
 
 	productEntities, err := c.productService.GetBatchProducts(ctx, productIds)
 	if err != nil {
-		c.logger.Errorf("[CartService-2] GetCart: %v", err)
+		c.logger.Errorf("[CartService] GetCart: %v", err)
 		return nil, err
 	}
 

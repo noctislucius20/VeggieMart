@@ -43,4 +43,9 @@ var NotificationPermissions = []model.Permission{
 		Action:   "delete",
 		Scope:    "all",
 	},
+	{
+		Resource: "notifications",
+		Action:   "ws",
+		Scope:    "all",
+	},
 }

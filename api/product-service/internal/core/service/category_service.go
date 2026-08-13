@@ -60,7 +60,7 @@ func (c *categoryService) GetBatchCategories(ctx context.Context, categoryIds []
 
 		return nil
 	}); err != nil {
-		c.logger.Errorf("[CategoryService-1] GetBatchCategories: %v", err)
+		c.logger.Errorf("[CategoryService] GetBatchCategories: %v", err)
 		return nil, err
 	}
 
@@ -83,7 +83,7 @@ func (c *categoryService) GetCategoryById(ctx context.Context, id int64) (*entit
 
 		return nil
 	}); err != nil {
-		c.logger.Errorf("[CategoryService-1] GetCategoryById: %v", err)
+		c.logger.Errorf("[CategoryService] GetCategoryById: %v", err)
 		return nil, err
 	}
 
@@ -106,7 +106,7 @@ func (c *categoryService) GetCategoryBySlug(ctx context.Context, slug string) (*
 
 		return nil
 	}); err != nil {
-		c.logger.Errorf("[CategoryService-1] GetCategoryBySlug: %v", err)
+		c.logger.Errorf("[CategoryService] GetCategoryBySlug: %v", err)
 		return nil, err
 	}
 
@@ -127,7 +127,7 @@ func (c *categoryService) GetAllCategoriesPublished(ctx context.Context) ([]enti
 
 		return nil
 	}); err != nil {
-		c.logger.Errorf("[CategoryService-1] GetAllCategoriesPublished: %v", err)
+		c.logger.Errorf("[CategoryService] GetAllCategoriesPublished: %v", err)
 		return nil, err
 	}
 
@@ -154,7 +154,7 @@ func (c *categoryService) CreateCategory(ctx context.Context, req entity.Categor
 
 		return nil
 	}); err != nil {
-		c.logger.Errorf("[CategoryService-1] CreateCategory: %v", err)
+		c.logger.Errorf("[CategoryService] CreateCategory: %v", err)
 		return "", 0, err
 	}
 
@@ -174,7 +174,7 @@ func (c *categoryService) DeleteCategory(ctx context.Context, categoryId int64) 
 
 		return nil
 	}); err != nil {
-		c.logger.Errorf("[CategoryService-1] DeleteCategory: %v", err)
+		c.logger.Errorf("[CategoryService] DeleteCategory: %v", err)
 		return err
 	}
 
@@ -199,7 +199,7 @@ func (c *categoryService) GetAllCategories(ctx context.Context, query entity.Que
 
 		return nil
 	}); err != nil {
-		c.logger.Errorf("[CategoryService-1] GetAllCategories: %v", err)
+		c.logger.Errorf("[CategoryService] GetAllCategories: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -221,7 +221,7 @@ func (c *categoryService) UpdateCategory(ctx context.Context, req entity.Categor
 
 		return nil
 	}); err != nil {
-		c.logger.Errorf("[CategoryService-1] UpdateCategory: %v", err)
+		c.logger.Errorf("[CategoryService] UpdateCategory: %v", err)
 		return err
 	}
 

@@ -17,11 +17,11 @@ func InternalServiceMiddleware(cfg *config.Config) echo.MiddlewareFunc {
 			serviceSecret := c.Request().Header.Get("X-Service-Secret")
 
 			if !helper.IsServiceAllowed(serviceName) {
-				return c.JSON(http.StatusForbidden, response.ResponseFailed(utils.SERVICE_NOT_ALLOWED))
+				return c.JSON(http.StatusForbidden, response.ResponseFailed(utils.ErrServiceNotAllowed.Error()))
 			}
 
 			if serviceSecret != cfg.APIInternalService.SecretKey {
-				return c.JSON(http.StatusForbidden, response.ResponseFailed(utils.SERVICE_SECRET_INVALID))
+				return c.JSON(http.StatusForbidden, response.ResponseFailed(utils.ErrServiceSecretInvalid.Error()))
 			}
 
 			c.Logger().Infof("request from internal service: %s", serviceName)

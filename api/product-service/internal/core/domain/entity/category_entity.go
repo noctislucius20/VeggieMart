@@ -17,4 +17,5 @@ type QueryStringEntity struct {
 	Limit     int64
 	OrderBy   string
 	OrderType string
+	Status    string
 }

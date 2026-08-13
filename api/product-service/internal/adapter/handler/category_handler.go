@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"product-service/config"
 	"product-service/internal/adapter"
@@ -60,12 +61,13 @@ func NewCategoryHandler(e *echo.Echo, categoryService service.CategoryServiceInt
 	}
 
 	// adminGroup := e.Group("/admin", mid.CheckToken())
-	productGroup.POST("/categories", categoryHandler.CreateCategoryAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	productGroup.GET("/categories", categoryHandler.GetAllCategoriesAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	productGroup.GET("/categories/:id", categoryHandler.GetCategoryByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	productGroup.GET("/categories/:slug/slug", categoryHandler.GetCategoryBySlugAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	productGroup.PUT("/categories/:id", categoryHandler.UpdateCategoryAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	productGroup.DELETE("/categories/:id", categoryHandler.DeleteCategoryAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	adminCategoryGroup := productGroup.Group("/categories", mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	adminCategoryGroup.POST("", categoryHandler.CreateCategoryAdmin)
+	adminCategoryGroup.GET("", categoryHandler.GetAllCategoriesAdmin)
+	adminCategoryGroup.GET("/:id", categoryHandler.GetCategoryByIdAdmin)
+	adminCategoryGroup.GET("/:slug/slug", categoryHandler.GetCategoryBySlugAdmin)
+	adminCategoryGroup.PUT("/:id", categoryHandler.UpdateCategoryAdmin)
+	adminCategoryGroup.DELETE("/:id", categoryHandler.DeleteCategoryAdmin)
 
 	return categoryHandler
 }
@@ -79,9 +81,9 @@ func (ch *categoryHandler) GetAllCategoriesShop(c echo.Context) error {
 
 	results, err := ch.categoryService.GetAllCategoriesPublished(ctx)
 	if err != nil {
-		c.Logger().Warnf("[CategoryHandler-1] GetAllCategoriesShop: %v", err)
-		if err.Error() == utils.DATA_NOT_FOUND {
-			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.DATA_NOT_FOUND))
+		c.Logger().Warnf("[CategoryHandler] GetAllCategoriesShop: %v", err)
+		if errors.Is(err, utils.ErrDataNotFound) {
+			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.ErrDataNotFound.Error()))
 		}
 		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
 	}
@@ -118,9 +120,9 @@ func (ch *categoryHandler) GetAllCategoriesHome(c echo.Context) error {
 
 	results, err := ch.categoryService.GetAllCategoriesPublished(ctx)
 	if err != nil {
-		c.Logger().Warnf("[CategoryHandler-1] GetAllCategoriesHome: %v", err)
-		if err.Error() == utils.DATA_NOT_FOUND {
-			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.DATA_NOT_FOUND))
+		c.Logger().Warnf("[CategoryHandler] GetAllCategoriesHome: %v", err)
+		if errors.Is(err, utils.ErrDataNotFound) {
+			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.ErrDataNotFound.Error()))
 		}
 		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
 	}
@@ -146,31 +148,31 @@ func (ch *categoryHandler) UpdateCategoryAdmin(c echo.Context) error {
 		req = request.CategoryRequest{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[CategoryHandler-1] UpdateCategoryAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[CategoryHandler] UpdateCategoryAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[CategoryHandler-2] UpdateCategoryAdmin: id is required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id is required"))
+		c.Logger().Errorf("[CategoryHandler] UpdateCategoryAdmin: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	categoryId, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[CategoryHandler-3] UpdateCategoryAdmin: id is invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id is invalid"))
+		c.Logger().Errorf("[CategoryHandler] UpdateCategoryAdmin: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	if err := c.Bind(&req); err != nil {
-		c.Logger().Errorf("[CategoryHandler-4] UpdateCategoryAdmin: %v", err)
+		c.Logger().Errorf("[CategoryHandler] UpdateCategoryAdmin: %v", err)
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[CategoryHandler-5] UpdateCategoryAdmin: %v", err)
+		c.Logger().Errorf("[CategoryHandler] UpdateCategoryAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -185,12 +187,12 @@ func (ch *categoryHandler) UpdateCategoryAdmin(c echo.Context) error {
 
 	err = ch.categoryService.UpdateCategory(ctx, reqEntity)
 	if err != nil {
-		c.Logger().Warnf("[CategoryHandler-6] UpdateCategoryAdmin: %v", err)
-		if err.Error() == utils.DATA_NOT_FOUND {
-			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.DATA_NOT_FOUND))
+		c.Logger().Errorf("[CategoryHandler] UpdateCategoryAdmin: %v", err)
+		if errors.Is(err, utils.ErrDataNotFound) {
+			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.ErrDataNotFound.Error()))
 		}
-		if err.Error() == "409" {
-			return c.JSON(http.StatusConflict, response.ResponseFailed("data already exists"))
+		if errors.Is(err, utils.ErrDataAlreadyExists) {
+			return c.JSON(http.StatusConflict, response.ResponseFailed(utils.ErrDataAlreadyExists.Error()))
 		}
 		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
 	}
@@ -204,36 +206,36 @@ func (ch *categoryHandler) DeleteCategoryAdmin(c echo.Context) error {
 		ctx = c.Request().Context()
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[CategoryHandler-1] DeleteCategoryAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[CategoryHandler] DeleteCategoryAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[CategoryHandler-2] DeleteCategoryAdmin: id is required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id is required"))
+		c.Logger().Errorf("[CategoryHandler] DeleteCategoryAdmin: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[CategoryHandler-3] DeleteCategoryAdmin: id is invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id is invalid"))
+		c.Logger().Errorf("[CategoryHandler] DeleteCategoryAdmin: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	if err := ch.categoryService.DeleteCategory(ctx, id); err != nil {
-		c.Logger().Warnf("[CategoryHandler-4] DeleteCategoryAdmin: %v", err)
-		if err.Error() == utils.DATA_NOT_FOUND {
-			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.DATA_NOT_FOUND))
+		c.Logger().Warnf("[CategoryHandler] DeleteCategoryAdmin: %v", err)
+		if errors.Is(err, utils.ErrDataNotFound) {
+			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.ErrDataNotFound.Error()))
 		}
-		if err.Error() == "422" {
-			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("data is still being used"))
+		if errors.Is(err, utils.ErrDataStillInUsed) {
+			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrDataStillInUsed.Error()))
 		}
 		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
 	}
 
-	return c.JSON(http.StatusOK, response.ResponseSuccess(nil))
+	return c.JSON(http.StatusNoContent, response.ResponseSuccess(nil))
 }
 
 // CreateCategoryAdmin implements CategoryHandlerInterface.
@@ -243,19 +245,19 @@ func (ch *categoryHandler) CreateCategoryAdmin(c echo.Context) error {
 		req = request.CategoryRequest{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[CategoryHandler-1] CreateCategoryAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[CategoryHandler] CreateCategoryAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := c.Bind(&req); err != nil {
-		c.Logger().Errorf("[CategoryHandler-2] CreateCategoryAdmin: %v", err)
+		c.Logger().Errorf("[CategoryHandler] CreateCategoryAdmin: %v", err)
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[CategoryHandler-3] CreateCategoryAdmin: %v", err)
+		c.Logger().Errorf("[CategoryHandler] CreateCategoryAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -269,9 +271,9 @@ func (ch *categoryHandler) CreateCategoryAdmin(c echo.Context) error {
 
 	slug, categoryId, err := ch.categoryService.CreateCategory(ctx, reqEntity)
 	if err != nil {
-		c.Logger().Errorf("[CategoryHandler-4] CreateCategoryAdmin: %v", err)
-		if err.Error() == "409" {
-			return c.JSON(http.StatusConflict, response.ResponseFailed("data already exists"))
+		c.Logger().Errorf("[CategoryHandler] CreateCategoryAdmin: %v", err)
+		if errors.Is(err, utils.ErrDataAlreadyExists) {
+			return c.JSON(http.StatusConflict, response.ResponseFailed(utils.ErrDataAlreadyExists.Error()))
 		}
 		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
 	}
@@ -291,29 +293,29 @@ func (ch *categoryHandler) GetCategoryByIdAdmin(c echo.Context) error {
 		respCategories = response.CategoryResponse{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[CategoryHandler-1] GetCategoryByIdAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[CategoryHandler] GetCategoryByIdAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[CategoryHandler-2] GetCategoryByIdAdmin: id is required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id is required"))
+		c.Logger().Errorf("[CategoryHandler] GetCategoryByIdAdmin: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[CategoryHandler-3] GetCategoryByIdAdmin: id is invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id is invalid"))
+		c.Logger().Errorf("[CategoryHandler] GetCategoryByIdAdmin: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	result, err := ch.categoryService.GetCategoryById(ctx, id)
 	if err != nil {
-		c.Logger().Warnf("[CategoryHandler-4] GetCategoryByIdAdmin: %v", err)
-		if err.Error() == utils.DATA_NOT_FOUND {
-			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.DATA_NOT_FOUND))
+		c.Logger().Warnf("[CategoryHandler] GetCategoryByIdAdmin: %v", err)
+		if errors.Is(err, utils.ErrDataNotFound) {
+			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.ErrDataNotFound.Error()))
 		}
 		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
 	}
@@ -337,23 +339,23 @@ func (ch *categoryHandler) GetCategoryBySlugAdmin(c echo.Context) error {
 		respCategories = response.CategoryResponse{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[CategoryHandler-1] GetCategoryBySlugAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[CategoryHandler] GetCategoryBySlugAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	slug := c.Param("slug")
 	if slug == "" {
-		c.Logger().Errorf("[CategoryHandler-2] GetCategoryBySlugAdmin: slug is required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("slug is required"))
+		c.Logger().Errorf("[CategoryHandler] GetCategoryBySlugAdmin: %v", utils.ErrSlugRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrSlugRequired.Error()))
 	}
 
 	result, err := ch.categoryService.GetCategoryBySlug(ctx, slug)
 	if err != nil {
-		c.Logger().Warnf("[CategoryHandler-3] GetCategoryBySlugAdmin: %v", err)
-		if err.Error() == utils.DATA_NOT_FOUND {
-			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.DATA_NOT_FOUND))
+		c.Logger().Warnf("[CategoryHandler] GetCategoryBySlugAdmin: %v", err)
+		if errors.Is(err, utils.ErrDataNotFound) {
+			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.ErrDataNotFound.Error()))
 		}
 		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
 	}
@@ -377,13 +379,14 @@ func (ch *categoryHandler) GetAllCategoriesAdmin(c echo.Context) error {
 		respCategories = []response.CategoryListResponse{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[CategoryHandler-1] GetAllCategoriesAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[CategoryHandler] GetAllCategoriesAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	search := c.QueryParam("search")
+	status := c.QueryParam("status")
 	orderBy := c.QueryParam("order_by")
 	if orderBy == "" {
 		orderBy = "created_at"
@@ -396,13 +399,13 @@ func (ch *categoryHandler) GetAllCategoriesAdmin(c echo.Context) error {
 
 	page, err := conv.ParseInt64QueryParam(c, "page", 1)
 	if err != nil {
-		c.Logger().Errorf("[CategoryHandler-2] GetAllCategoriesAdmin: %v", err)
+		c.Logger().Errorf("[CategoryHandler] GetAllCategoriesAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	limit, err := conv.ParseInt64QueryParam(c, "limit", 5)
 	if err != nil {
-		c.Logger().Errorf("[CategoryHandler-3] GetAllCategoriesAdmin: %v", err)
+		c.Logger().Errorf("[CategoryHandler] GetAllCategoriesAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -412,13 +415,14 @@ func (ch *categoryHandler) GetAllCategoriesAdmin(c echo.Context) error {
 		Limit:     limit,
 		OrderBy:   orderBy,
 		OrderType: orderType,
+		Status:    status,
 	}
 
 	results, countData, totalPages, err := ch.categoryService.GetAllCategories(ctx, reqEntity)
 	if err != nil {
-		c.Logger().Warnf("[CategoryHandler-4] GetAllCategoriesAdmin: %v", err)
-		if err.Error() == utils.DATA_NOT_FOUND {
-			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.DATA_NOT_FOUND))
+		c.Logger().Warnf("[CategoryHandler] GetAllCategoriesAdmin: %v", err)
+		if errors.Is(err, utils.ErrDataNotFound) {
+			return c.JSON(http.StatusNotFound, response.ResponseFailed(utils.ErrDataNotFound.Error()))
 		}
 		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
 	}

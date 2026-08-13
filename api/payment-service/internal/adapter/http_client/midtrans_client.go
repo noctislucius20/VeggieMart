@@ -38,7 +38,7 @@ func (m *midtransClient) CreateTransaction(orderCode string, amount int64, custo
 
 	snapRes, err := s.CreateTransaction(snapReq)
 	if err != nil {
-		m.logger.Errorf("[MidtransClient-1] failed to create transaction: %v", err)
+		m.logger.Errorf("[MidtransClient] failed to create transaction: %v", err)
 		return "", "", err
 	}
 

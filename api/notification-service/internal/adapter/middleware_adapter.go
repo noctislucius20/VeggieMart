@@ -44,57 +44,47 @@ func NewMiddlewareAdapter(cfg *config.Config, logger *log.Logger, jwtService ser
 func (m *middlewareAdapter) CheckToken() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			var tokenString string
+
 			authHeader := c.Request().Header.Get("Authorization")
-			if authHeader == "" {
-				err := errors.New(utils.TOKEN_INVALID)
-				m.logger.Errorf("[MiddlewareAdapter-1] CheckToken: %v", err)
+			if authHeader != "" {
+				tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+			} else if c.IsWebSocket() {
+				tokenString = c.QueryParam("token")
+			}
+
+			if tokenString == "" {
+				err := utils.ErrTokenInvalid
+				m.logger.Errorf("[MiddlewareAdapter] CheckToken: %v", err)
 				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 			}
 
-			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-
 			_, err := m.jwtService.ValidateToken(tokenString)
 			if err != nil {
-				err := errors.New(utils.SESSION_EXPIRED)
-				m.logger.Errorf("[MiddlewareAdapter-2] CheckToken: %v", err)
+				err := utils.ErrSessionExpired
+				m.logger.Errorf("[MiddlewareAdapter] CheckToken: %v", err)
 				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 			}
 
 			keyIdxSession := fmt.Sprintf("user:session:%s", tokenString)
 			getIdxSession, err := m.redisClient.Get(c.Request().Context(), keyIdxSession).Result()
 			if err != nil {
-				m.logger.Errorf("[MiddlewareAdapter-3] CheckToken: %v", err)
+				m.logger.Errorf("[MiddlewareAdapter] CheckToken: %v", err)
 				if errors.Is(err, redis.Nil) {
-					err := errors.New(utils.TOKEN_INVALID)
+					err := utils.ErrTokenInvalid
 					return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 				}
-				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 			}
 
 			keySession := fmt.Sprintf("user:id:%s:session", getIdxSession)
 			getSession, err := m.redisClient.Get(c.Request().Context(), keySession).Result()
 			if err != nil {
-				m.logger.Errorf("[MiddlewareAdapter-4] CheckToken: %v", err)
-				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+				m.logger.Errorf("[MiddlewareAdapter] CheckToken: %v", err)
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 			}
 
 			c.Set("user", getSession)
-
-			// jwtUserData := entity.JwtUserData{}
-			// err = json.Unmarshal([]byte(getSession), &jwtUserData)
-			// if err != nil {
-			// 	m.logger.Errorf("[MiddlewareAdapter-5] CheckToken: %v", err)
-			// 	return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
-			// }
-
-			// path := c.Request().URL.Path
-			// segments := strings.Split(strings.Trim(path, "/"), "/")
-
-			// if strings.ToLower(jwtUserData.RoleName) == "customer" && segments[0] == "admin" {
-			// 	err := errors.New(utils.ACCESS_FORBIDDEN)
-			// 	m.logger.Errorf("[MiddlewareAdapter-6] CheckToken: %v", err)
-			// 	return c.JSON(http.StatusForbidden, response.ResponseFailed(err.Error()))
-			// }
 
 			return next(c)
 		}
@@ -109,33 +99,33 @@ func (m *middlewareAdapter) RequiredPermission(requiredPermissions ...string) ec
 				jwtUserData entity.JwtUserData
 				roleEntity  entity.RoleEntity
 				permissions []string
-				user        = c.Get("user").(string)
 			)
 
-			if user == "" {
-				err := errors.New(utils.TOKEN_INVALID)
-				m.logger.Errorf("[MiddlewareAdapter-1] RequiredPermission: %v", err)
+			user, ok := c.Get("user").(string)
+			if !ok || user == "" {
+				err := utils.ErrTokenInvalid
+				m.logger.Errorf("[MiddlewareAdapter] RequiredPermission: %v", err)
 				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 			}
 
 			if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
-				m.logger.Errorf("[MiddlewareAdapter-2] RequiredPermission: %v", err)
-				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+				m.logger.Errorf("[MiddlewareAdapter] RequiredPermission: %v", err)
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 			}
 
 			keyRolePermission := fmt.Sprintf("role:id:%d", jwtUserData.RoleID)
 			rolePermission, err := m.redisClient.Get(c.Request().Context(), keyRolePermission).Result()
 			if err != nil {
-				m.logger.Errorf("[MiddlewareAdapter-3] RequiredPermission: %v", err)
+				m.logger.Errorf("[MiddlewareAdapter] RequiredPermission: %v", err)
 				if errors.Is(err, redis.Nil) {
-					return c.JSON(http.StatusForbidden, response.ResponseFailed(utils.ACCESS_FORBIDDEN))
+					return c.JSON(http.StatusForbidden, response.ResponseFailed(utils.ErrAccessForbidden.Error()))
 				}
-				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 			}
 
 			if err := json.Unmarshal([]byte(rolePermission), &roleEntity); err != nil {
-				m.logger.Errorf("[MiddlewareAdapter-4] RequiredPermission: %v", err)
-				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+				m.logger.Errorf("[MiddlewareAdapter] RequiredPermission: %v", err)
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 			}
 
 			for _, p := range roleEntity.Permissions {
@@ -143,8 +133,8 @@ func (m *middlewareAdapter) RequiredPermission(requiredPermissions ...string) ec
 			}
 
 			if allowed := helper.HasRequiredPermissions(permissions, requiredPermissions); !allowed {
-				err := errors.New(utils.ACCESS_FORBIDDEN)
-				m.logger.Errorf("[MiddlewareAdapter-5] RequiredPermission: %v", err)
+				err := utils.ErrAccessForbidden
+				m.logger.Errorf("[MiddlewareAdapter] RequiredPermission: %v", err)
 				return c.JSON(http.StatusForbidden, response.ResponseFailed(err.Error()))
 			}
 

@@ -18,7 +18,7 @@ import (
 
 type UserServiceInterface interface {
 	SignIn(ctx context.Context, req entity.UserEntity) (*entity.UserEntity, string, error)
-	CreateUserAccount(ctx context.Context, req entity.UserEntity) (int64, error)
+	SignUp(ctx context.Context, req entity.UserEntity) (int64, error)
 	ForgotPassword(ctx context.Context, req entity.UserEntity) error
 	ActivateAccount(ctx context.Context, token string) (*entity.UserEntity, error)
 	UpdatePassword(ctx context.Context, req entity.UserEntity) error
@@ -74,7 +74,7 @@ func (u *userService) GetBatchCustomers(ctx context.Context, userIds []int64) ([
 
 		return nil
 	}); err != nil {
-		u.logger.Errorf("[UserService-1] GetBatchCustomers: %v", err)
+		u.logger.Errorf("[UserService] GetBatchCustomers: %v", err)
 		return nil, err
 	}
 
@@ -94,7 +94,7 @@ func (u *userService) DeleteCustomer(ctx context.Context, customerId int64) erro
 
 		return nil
 	}); err != nil {
-		u.logger.Errorf("[UserService-1] DeleteCustomer: %v", err)
+		u.logger.Errorf("[UserService] DeleteCustomer: %v", err)
 		return err
 	}
 
@@ -119,8 +119,7 @@ func (u *userService) UpdateCustomer(ctx context.Context, req entity.UserEntity)
 
 		_, err := u.roleService.GetRoleByIdAdmin(txCtx, req.RoleID)
 		if err != nil {
-			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
-			return err
+			return utils.ErrInternalServerError
 		}
 
 		if err := u.repo.UpdateCustomer(txCtx, req); err != nil {
@@ -131,11 +130,11 @@ func (u *userService) UpdateCustomer(ctx context.Context, req entity.UserEntity)
 			payloadMessage := fmt.Sprintf("Your password has been updated in Sayur App. Please use this credential to login: \n Email: %s\nPassword: %s", req.Email, password)
 
 			publishEmailPayload := map[string]any{
-				"receiver_email":    req.Email,
-				"message":           payloadMessage,
-				"subject":           "Updated Data Customer",
-				"receiver_id":       req.ID,
-				"notification_type": "EMAIL",
+				"receiver_email":      req.Email,
+				"message":             payloadMessage,
+				"subject":             "Updated Data Customer",
+				"receiver_id":         req.ID,
+				"notification_method": "EMAIL",
 			}
 
 			if err := u.repoOutbox.CreateEvent(txCtx, utils.NOTIF_EMAIL_UPDATE_CUSTOMER, publishEmailPayload, &req.ID); err != nil {
@@ -150,7 +149,7 @@ func (u *userService) UpdateCustomer(ctx context.Context, req entity.UserEntity)
 
 		return nil
 	}); err != nil {
-		u.logger.Errorf("[UserService-1] UpdateCustomer: %v", err)
+		u.logger.Errorf("[UserService] UpdateCustomer: %v", err)
 		return err
 	}
 
@@ -172,8 +171,7 @@ func (u *userService) CreateCustomer(ctx context.Context, req entity.UserEntity)
 		req.Password = hashedPassword
 
 		if _, err := u.roleService.GetRoleByIdAdmin(txCtx, req.RoleID); err != nil {
-			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
-			return err
+			return utils.ErrInternalServerError
 		}
 
 		customerIdCreated, err := u.repo.CreateCustomer(txCtx, req)
@@ -187,11 +185,11 @@ func (u *userService) CreateCustomer(ctx context.Context, req entity.UserEntity)
 			<p><b>Password: %s </b></p>`, req.Email, password)
 
 		publishEmailPayload := map[string]any{
-			"receiver_email":    req.Email,
-			"message":           payloadMessage,
-			"subject":           "Verify Your Account",
-			"receiver_id":       customerIdCreated,
-			"notification_type": "EMAIL",
+			"receiver_email":      req.Email,
+			"message":             payloadMessage,
+			"subject":             "Verify Your Account",
+			"receiver_id":         customerIdCreated,
+			"notification_method": "EMAIL",
 		}
 
 		if err := u.repoOutbox.CreateEvent(txCtx, utils.NOTIF_EMAIL_CREATE_CUSTOMER, publishEmailPayload, &customerId); err != nil {
@@ -206,7 +204,7 @@ func (u *userService) CreateCustomer(ctx context.Context, req entity.UserEntity)
 
 		return nil
 	}); err != nil {
-		u.logger.Errorf("[UserService-1] CreateCustomer: %v", err)
+		u.logger.Errorf("[UserService] CreateCustomer: %v", err)
 		return 0, err
 	}
 
@@ -229,7 +227,7 @@ func (u *userService) GetCustomerById(ctx context.Context, customerId int64) (*e
 
 		return nil
 	}); err != nil {
-		u.logger.Errorf("[UserService-1] GetCustomerById: %v", err)
+		u.logger.Errorf("[UserService] GetCustomerById: %v", err)
 		return nil, err
 	}
 
@@ -254,7 +252,7 @@ func (u *userService) GetCustomersAll(ctx context.Context, query entity.QueryStr
 
 		return nil
 	}); err != nil {
-		u.logger.Errorf("[UserService-1] GetCustomersAll: %v", err)
+		u.logger.Errorf("[UserService] GetCustomersAll: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -275,8 +273,7 @@ func (u *userService) UpdateProfile(ctx context.Context, req entity.UserEntity) 
 
 		profile, err := u.cacheUser.GetProfileById(txCtx, req.ID)
 		if err != nil {
-			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
-			return err
+			return utils.ErrInternalServerError
 		}
 
 		tokenString, err := u.jwtService.GenerateToken(req.ID)
@@ -307,7 +304,7 @@ func (u *userService) UpdateProfile(ctx context.Context, req entity.UserEntity) 
 
 		return nil
 	}); err != nil {
-		u.logger.Errorf("[UserService-1] UpdateProfile: %v", err)
+		u.logger.Errorf("[UserService] UpdateProfile: %v", err)
 		return "", "", err
 	}
 
@@ -328,8 +325,7 @@ func (u *userService) GetProfileById(ctx context.Context, userId int64) (*entity
 
 		roleEntity, err := u.roleService.GetRoleByIdAdmin(txCtx, profileEntity.RoleID)
 		if err != nil {
-			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
-			return err
+			return utils.ErrInternalServerError
 		}
 
 		profileEntity.RoleName = roleEntity.Name
@@ -338,7 +334,7 @@ func (u *userService) GetProfileById(ctx context.Context, userId int64) (*entity
 
 		return nil
 	}); err != nil {
-		u.logger.Errorf("[UserService-1] GetProfileById: %v", err)
+		u.logger.Errorf("[UserService] GetProfileById: %v", err)
 		return nil, err
 	}
 
@@ -354,12 +350,12 @@ func (u *userService) UpdatePassword(ctx context.Context, req entity.UserEntity)
 		}
 
 		if tokenEntity.TokenType != utils.NOTIF_EMAIL_FORGOT_PASSWORD {
-			err := errors.New(utils.TOKEN_INVALID)
+			err := utils.ErrTokenInvalid
 			return err
 		}
 
 		if time.Now().After(tokenEntity.ExpiresAt) {
-			err := errors.New(utils.TOKEN_EXPIRED)
+			err := utils.ErrTokenExpired
 			return err
 		}
 
@@ -385,7 +381,7 @@ func (u *userService) UpdatePassword(ctx context.Context, req entity.UserEntity)
 
 		return nil
 	}); err != nil {
-		u.logger.Errorf("[UserService-1] UpdatePassword: %v", err)
+		u.logger.Errorf("[UserService] UpdatePassword: %v", err)
 		return err
 	}
 
@@ -406,12 +402,12 @@ func (u *userService) ActivateAccount(ctx context.Context, token string) (*entit
 		}
 
 		if tokenEntity.TokenType != utils.NOTIF_EMAIL_VERIFICATION {
-			err := errors.New(utils.TOKEN_INVALID)
+			err := utils.ErrTokenInvalid
 			return err
 		}
 
 		if time.Now().After(tokenEntity.ExpiresAt) {
-			err := errors.New(utils.TOKEN_EXPIRED)
+			err := utils.ErrTokenExpired
 			return err
 		}
 
@@ -448,8 +444,7 @@ func (u *userService) ActivateAccount(ctx context.Context, token string) (*entit
 
 		roleEntity, err := u.roleService.GetRoleByIdAdmin(txCtx, tokenEntity.User.RoleID)
 		if err != nil {
-			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
-			return err
+			return utils.ErrInternalServerError
 		}
 
 		tokenEntity.User.Token = accessToken
@@ -459,7 +454,7 @@ func (u *userService) ActivateAccount(ctx context.Context, token string) (*entit
 
 		return nil
 	}); err != nil {
-		u.logger.Errorf("[UserService-1] ActivateAccount: %v", err)
+		u.logger.Errorf("[UserService] ActivateAccount: %v", err)
 		return nil, err
 	}
 
@@ -475,7 +470,7 @@ func (u *userService) ForgotPassword(ctx context.Context, req entity.UserEntity)
 		}
 
 		if user.IsVerified == false {
-			err := errors.New(utils.EMAIL_NOT_VERIFIED)
+			err := utils.ErrEmailNotVerified
 			return err
 		}
 
@@ -493,11 +488,11 @@ func (u *userService) ForgotPassword(ctx context.Context, req entity.UserEntity)
 		payloadMessage := fmt.Sprintf("Please click link below to reset your password: %v", urlForgot)
 
 		publishEmailPayload := map[string]any{
-			"receiver_email":    req.Email,
-			"message":           payloadMessage,
-			"subject":           "Reset Password",
-			"receiver_id":       user.ID,
-			"notification_type": "EMAIL",
+			"receiver_email":      req.Email,
+			"message":             payloadMessage,
+			"subject":             "Reset Password",
+			"receiver_id":         user.ID,
+			"notification_method": "EMAIL",
 		}
 		if err := u.repoOutbox.CreateEvent(txCtx, utils.NOTIF_EMAIL_FORGOT_PASSWORD, publishEmailPayload, &user.ID); err != nil {
 			return err
@@ -505,15 +500,15 @@ func (u *userService) ForgotPassword(ctx context.Context, req entity.UserEntity)
 
 		return nil
 	}); err != nil {
-		u.logger.Errorf("[UserService-1] ForgotPassword: %v", err)
+		u.logger.Errorf("[UserService] ForgotPassword: %v", err)
 		return err
 	}
 
 	return nil
 }
 
-// CreateUserAccount implements UserServiceInterface.
-func (u *userService) CreateUserAccount(ctx context.Context, req entity.UserEntity) (int64, error) {
+// SignUp implements UserServiceInterface.
+func (u *userService) SignUp(ctx context.Context, req entity.UserEntity) (int64, error) {
 	var userId int64
 
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
@@ -523,13 +518,12 @@ func (u *userService) CreateUserAccount(ctx context.Context, req entity.UserEnti
 		}
 
 		if _, err := u.roleService.GetRoleByIdAdmin(txCtx, req.RoleID); err != nil {
-			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
-			return err
+			return utils.ErrInternalServerError
 		}
 
 		req.Password = password
 
-		userIdCreated, err := u.repo.CreateUserAccount(txCtx, req)
+		userIdCreated, err := u.repo.SignUp(txCtx, req)
 		if err != nil {
 			return err
 		}
@@ -549,11 +543,11 @@ func (u *userService) CreateUserAccount(ctx context.Context, req entity.UserEnti
 		payloadMessage := fmt.Sprintf("Please click link below to activate your account: %v", urlVerify)
 
 		publishEmailPayload := map[string]any{
-			"receiver_email":    req.Email,
-			"message":           payloadMessage,
-			"subject":           "Account Exists",
-			"receiver_id":       userIdCreated,
-			"notification_type": "EMAIL",
+			"receiver_email":      req.Email,
+			"message":             payloadMessage,
+			"subject":             "Account Exists",
+			"receiver_id":         userIdCreated,
+			"notification_method": "EMAIL",
 		}
 
 		if err := u.repoOutbox.CreateEvent(txCtx, utils.NOTIF_EMAIL_VERIFICATION, publishEmailPayload, &userIdCreated); err != nil {
@@ -568,7 +562,7 @@ func (u *userService) CreateUserAccount(ctx context.Context, req entity.UserEnti
 
 		return nil
 	}); err != nil {
-		u.logger.Errorf("[UserService-1] CreateUserAccount: %v", err)
+		u.logger.Errorf("[UserService] SignUp: %v", err)
 		return 0, err
 	}
 
@@ -586,19 +580,19 @@ func (u *userService) SignIn(ctx context.Context, req entity.UserEntity) (*entit
 	if err := u.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
 		userEntity, err := u.cacheUser.GetUserByEmail(txCtx, req.Email)
 		if err != nil {
-			if err.Error() == utils.DATA_NOT_FOUND {
-				err = errors.New(utils.LOGIN_INVALID)
+			if errors.Is(err, utils.ErrDataNotFound) {
+				err = utils.ErrLoginInvalid
 			}
 			return err
 		}
 
 		if checkPass := conv.CheckPasswordHash(req.Password, userEntity.Password); !checkPass {
-			err = errors.New(utils.LOGIN_INVALID)
+			err = utils.ErrLoginInvalid
 			return err
 		}
 
 		if userEntity.IsVerified == false {
-			err := errors.New(utils.EMAIL_NOT_VERIFIED)
+			err := utils.ErrEmailNotVerified
 			return err
 		}
 
@@ -623,8 +617,7 @@ func (u *userService) SignIn(ctx context.Context, req entity.UserEntity) (*entit
 
 		roleEntity, err := u.roleService.GetRoleByIdAdmin(txCtx, userEntity.RoleID)
 		if err != nil {
-			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
-			return err
+			return utils.ErrInternalServerError
 		}
 
 		userEntity.RoleName = roleEntity.Name
@@ -633,7 +626,7 @@ func (u *userService) SignIn(ctx context.Context, req entity.UserEntity) (*entit
 
 		return nil
 	}); err != nil {
-		u.logger.Errorf("[UserService-1] SignIn: %v", err)
+		u.logger.Errorf("[UserService] SignIn: %v", err)
 		return nil, "", err
 	}
 

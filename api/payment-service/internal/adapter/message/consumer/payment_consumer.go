@@ -9,6 +9,7 @@ import (
 	"payment-service/internal/core/domain/entity"
 	"payment-service/internal/core/service/transaction"
 	"strings"
+	"time"
 
 	"github.com/labstack/gommon/log"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -46,7 +47,7 @@ func NewPaymentConsumerWorker(conn *amqp.Connection, db *gorm.DB, cfg *config.Co
 func (p *paymentConsumerWorker) StartUpdatePaymentWorker(ctx context.Context) {
 	ch, err := p.conn.Channel()
 	if err != nil {
-		p.logger.Errorf("[PaymentConsumer-1] StartUpdatePaymentWorker: %v", err)
+		p.logger.Errorf("[PaymentConsumer] StartUpdatePaymentWorker: %v", err)
 		return
 	}
 
@@ -56,23 +57,23 @@ func (p *paymentConsumerWorker) StartUpdatePaymentWorker(ctx context.Context) {
 
 	queue, err := ch.QueueDeclare(paymentUpdate, true, false, false, false, nil)
 	if err != nil {
-		p.logger.Errorf("[PaymentConsumer-2] StartUpdatePaymentWorker: %v", err)
+		p.logger.Errorf("[PaymentConsumer] StartUpdatePaymentWorker: %v", err)
 		return
 	}
 
 	msgs, err := ch.Consume(queue.Name, "", false, false, false, false, nil)
 	if err != nil {
-		p.logger.Errorf("[PaymentConsumer-3] StartUpdatePaymentWorker: %v", err)
+		p.logger.Errorf("[PaymentConsumer] StartUpdatePaymentWorker: %v", err)
 		return
 	}
 
 	err = ch.Qos(1, 0, false)
 	if err != nil {
-		p.logger.Errorf("[PaymentConsumer-4] StartUpdatePaymentWorker: %v", err)
+		p.logger.Errorf("[PaymentConsumer] StartUpdatePaymentWorker: %v", err)
 		return
 	}
 
-	p.logger.Infof("[PaymentConsumer-5] StartUpdatePaymentWorker: waiting for messages. to exit press CTRL+C")
+	p.logger.Infof("[PaymentConsumer] StartUpdatePaymentWorker: waiting for messages. to exit press CTRL+C")
 
 	for {
 		select {
@@ -80,9 +81,8 @@ func (p *paymentConsumerWorker) StartUpdatePaymentWorker(ctx context.Context) {
 			return
 		case d, ok := <-msgs:
 			if !ok {
-				p.logger.Infof("[PaymentConsumer-6] StartUpdatePaymentWorker: %v", "channel closed")
-				d.Nack(false, true)
-				continue
+				p.logger.Infof("[PaymentConsumer] StartUpdatePaymentWorker: %v", "channel closed")
+				return
 			}
 
 			var payment struct {
@@ -93,7 +93,7 @@ func (p *paymentConsumerWorker) StartUpdatePaymentWorker(ctx context.Context) {
 
 			err := json.Unmarshal(d.Body, &payment)
 			if err != nil {
-				p.logger.Errorf("[PaymentConsumer-7] StartUpdatePaymentWorker: %v", err)
+				p.logger.Errorf("[PaymentConsumer] StartUpdatePaymentWorker: %v", err)
 				d.Nack(false, false)
 				continue
 			}
@@ -111,13 +111,14 @@ func (p *paymentConsumerWorker) StartUpdatePaymentWorker(ctx context.Context) {
 				return nil
 			}); err != nil {
 				d.Nack(false, true)
-				p.logger.Errorf("[PaymentConsumer-8] StartUpdatePaymentWorker: %v", err)
+				p.logger.Errorf("[PaymentConsumer] StartUpdatePaymentWorker: %v", err)
+				time.Sleep(1 * time.Second)
 				continue
 			}
 
 			d.Ack(false)
 
-			p.logger.Infof("[PaymentConsumer-9] StartUpdatePaymentWorker: payment for order %d successfully updated", payment.OrderID)
+			p.logger.Infof("[PaymentConsumer] StartUpdatePaymentWorker: payment for order %d successfully updated", payment.OrderID)
 		}
 	}
 }
@@ -126,7 +127,7 @@ func (p *paymentConsumerWorker) StartUpdatePaymentWorker(ctx context.Context) {
 func (p *paymentConsumerWorker) StartCreatePaymentWorker(ctx context.Context) {
 	ch, err := p.conn.Channel()
 	if err != nil {
-		p.logger.Errorf("[PaymentConsumer-1] StartCreatePaymentWorker: %v", err)
+		p.logger.Errorf("[PaymentConsumer] StartCreatePaymentWorker: %v", err)
 		return
 	}
 
@@ -136,23 +137,23 @@ func (p *paymentConsumerWorker) StartCreatePaymentWorker(ctx context.Context) {
 
 	queue, err := ch.QueueDeclare(orderPaymentCreate, true, false, false, false, nil)
 	if err != nil {
-		p.logger.Errorf("[PaymentConsumer-2] StartCreatePaymentWorker: %v", err)
+		p.logger.Errorf("[PaymentConsumer] StartCreatePaymentWorker: %v", err)
 		return
 	}
 
 	msgs, err := ch.Consume(queue.Name, "", false, false, false, false, nil)
 	if err != nil {
-		p.logger.Errorf("[PaymentConsumer-3] StartCreatePaymentWorker: %v", err)
+		p.logger.Errorf("[PaymentConsumer] StartCreatePaymentWorker: %v", err)
 		return
 	}
 
 	err = ch.Qos(1, 0, false)
 	if err != nil {
-		p.logger.Errorf("[PaymentConsumer-4] StartCreatePaymentWorker: %v", err)
+		p.logger.Errorf("[PaymentConsumer] StartCreatePaymentWorker: %v", err)
 		return
 	}
 
-	p.logger.Infof("[PaymentConsumer-5] StartCreatePaymentWorker: waiting for messages. to exit press CTRL+C")
+	p.logger.Infof("[PaymentConsumer] StartCreatePaymentWorker: waiting for messages. to exit press CTRL+C")
 
 	for {
 		select {
@@ -160,16 +161,15 @@ func (p *paymentConsumerWorker) StartCreatePaymentWorker(ctx context.Context) {
 			return
 		case d, ok := <-msgs:
 			if !ok {
-				p.logger.Infof("[PaymentConsumer-6] StartCreatePaymentWorker: %v", "channel closed")
-				d.Nack(false, true)
-				continue
+				p.logger.Infof("[PaymentConsumer] StartCreatePaymentWorker: %v", "channel closed")
+				return
 			}
 
 			var orderEntity entity.OrderEntity
 
 			err := json.Unmarshal(d.Body, &orderEntity)
 			if err != nil {
-				p.logger.Errorf("[PaymentConsumer-7] StartCreatePaymentWorker: %v", err)
+				p.logger.Errorf("[PaymentConsumer] StartCreatePaymentWorker: %v", err)
 				d.Nack(false, false)
 				continue
 			}
@@ -184,7 +184,7 @@ func (p *paymentConsumerWorker) StartCreatePaymentWorker(ctx context.Context) {
 			case "transfer":
 				paymentEntity.PaymentStatus = "PENDING"
 			default:
-				p.logger.Errorf("[PaymentConsumer-8] StartCreatePaymentWorker: %v", "invalid payment method")
+				p.logger.Errorf("[PaymentConsumer] StartCreatePaymentWorker: %v", "invalid payment method")
 				d.Nack(false, false)
 				continue
 			}
@@ -208,13 +208,14 @@ func (p *paymentConsumerWorker) StartCreatePaymentWorker(ctx context.Context) {
 				return nil
 			}); err != nil {
 				d.Nack(false, true)
-				p.logger.Errorf("[PaymentConsumer-9] StartCreatePaymentWorker: %v", err)
+				p.logger.Errorf("[PaymentConsumer] StartCreatePaymentWorker: %v", err)
+				time.Sleep(1 * time.Second)
 				continue
 			}
 
 			d.Ack(false)
 
-			p.logger.Infof("[PaymentConsumer-10] StartCreatePaymentWorker: payment for order %s successfully created", orderEntity.OrderCode)
+			p.logger.Infof("[PaymentConsumer] StartCreatePaymentWorker: payment for order %s successfully created", orderEntity.OrderCode)
 		}
 	}
 }

@@ -31,14 +31,14 @@ func (cfg Config) ConnectionPostgres(ctx context.Context) (*Postgres, error) {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
-		log.Errorf("[ConnectionPostgres-1] failed to connect with database %s", cfg.Psql.Host)
+		log.Errorf("[ConnectionPostgres] failed to connect with database %s", cfg.Psql.Host)
 		return nil, err
 	}
 
 	go func() {
 		sqlDB, err := db.DB()
 		if err != nil {
-			log.Errorf("[ConnectionPostgres-2] failed to connect with database")
+			log.Errorf("[ConnectionPostgres] failed to connect with database")
 			return
 		}
 
@@ -55,7 +55,7 @@ func (cfg Config) ConnectionPostgres(ctx context.Context) (*Postgres, error) {
 		<-ctx.Done()
 
 		sqlDB.Close()
-		log.Infof("[ConnectionPostgres-3] database connection closed")
+		log.Infof("[ConnectionPostgres] database connection closed")
 	}()
 
 	return &Postgres{DB: db}, nil

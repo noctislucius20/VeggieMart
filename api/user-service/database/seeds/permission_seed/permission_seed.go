@@ -10,7 +10,9 @@ import (
 )
 
 func SeedPermission(db *gorm.DB) {
-	permission := []model.Permission{}
+	var (
+		permission []model.Permission
+	)
 
 	permission = append(permission, data.UserPermissions...)
 	permission = append(permission, data.RolePermissions...)

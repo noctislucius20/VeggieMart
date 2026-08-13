@@ -9,19 +9,18 @@ import (
 )
 
 func RegisterPublicRoutes(g *echo.Group) {
-	notificationGroup := g.Group("/notifications")
-
-	notificationGroup.GET("/ws", wsProxyHandler)
 }
 
 func RegisterProtectedRoutes(g *echo.Group) {
 	notificationGroup := g.Group("/notifications")
 
 	notificationGroup.GET("", proxyHandler)
+	notificationGroup.GET("/ws", wsProxyHandler)
 	notificationGroup.GET("/push", proxyHandler)
 	notificationGroup.GET("/:id", proxyHandler)
 	notificationGroup.PUT("/:id/read", proxyHandler)
 	notificationGroup.PUT("/:id/sent", proxyHandler)
+	notificationGroup.GET("/admin/ws", wsProxyHandler)
 }
 
 func getNotificationServiceUrl() string {

@@ -1,9 +1,11 @@
 package adapter
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"order-service/config"
@@ -14,6 +16,7 @@ import (
 	"order-service/utils/conv"
 	"order-service/utils/helper"
 	"strings"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/labstack/echo/v4"
@@ -24,6 +27,7 @@ type MiddlewareAdapterInterface interface {
 	CheckToken() echo.MiddlewareFunc
 	DistanceCheck() echo.MiddlewareFunc
 	RequiredPermission(requiredPermissions ...string) echo.MiddlewareFunc
+	IdempotencyCreateOrder() echo.MiddlewareFunc
 
 	haversineDistance(lat1 float64, lng1 float64, lat2 float64, lng2 float64) float64
 }
@@ -35,6 +39,12 @@ type middlewareAdapter struct {
 	logger      *log.Logger
 }
 
+type responseRecorder struct {
+	io.Writer
+	http.ResponseWriter
+	body *bytes.Buffer
+}
+
 func NewMiddlewareAdapter(cfg *config.Config, logger *log.Logger, jwtService service.JwtServiceInterface, redisClient *redis.Client) MiddlewareAdapterInterface {
 	return &middlewareAdapter{
 		cfg:         cfg,
@@ -42,6 +52,11 @@ func NewMiddlewareAdapter(cfg *config.Config, logger *log.Logger, jwtService ser
 		redisClient: redisClient,
 		logger:      logger,
 	}
+}
+
+func (r *responseRecorder) Write(data []byte) (int, error) {
+	r.body.Write(data)
+	return r.ResponseWriter.Write(data)
 }
 
 // haversineDistance implements [MiddlewareAdapterInterface].
@@ -72,23 +87,23 @@ func (m *middlewareAdapter) DistanceCheck() echo.MiddlewareFunc {
 			latParam := c.QueryParam("lat")
 			lngParam := c.QueryParam("lng")
 			if latParam == "" || lngParam == "" {
-				err := errors.New(utils.LAT_OR_LNG_REQUIRED)
-				m.logger.Errorf("[MiddlewareAdapter-1] DistanceCheck: %v", err)
+				err := utils.ErrLatOrLngRequired
+				m.logger.Errorf("[MiddlewareAdapter] DistanceCheck: %v", err)
 				return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 			}
 
 			lat, lng, err := conv.ParseLatLngToFloat64(latParam, lngParam)
 			if err != nil {
-				err := errors.New(utils.LAT_OR_LNG_INVALID)
-				m.logger.Errorf("[MiddlewareAdapter-2] DistanceCheck: %v", err)
+				err := utils.ErrLatOrLngInvalid
+				m.logger.Errorf("[MiddlewareAdapter] DistanceCheck: %v", err)
 				return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 			}
 
 			latRef, lngRef, _ := conv.ParseLatLngToFloat64(m.cfg.App.LatitudeRef, m.cfg.App.LongitudeRef)
 			distance := m.haversineDistance(latRef, lngRef, lat, lng)
 			if distance > float64(m.cfg.App.MaxDistance) {
-				err := errors.New(utils.DISTANCE_TOO_FAR)
-				m.logger.Errorf("[MiddlewareAdapter-3] DistanceCheck: %v", err)
+				err := utils.ErrDistanceTooFar
+				m.logger.Errorf("[MiddlewareAdapter] DistanceCheck: %v", err)
 				return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 			}
 
@@ -105,33 +120,33 @@ func (m *middlewareAdapter) RequiredPermission(requiredPermissions ...string) ec
 				jwtUserData entity.JwtUserData
 				roleEntity  entity.RoleEntity
 				permissions []string
-				user        = c.Get("user").(string)
 			)
 
-			if user == "" {
-				err := errors.New(utils.TOKEN_INVALID)
-				m.logger.Errorf("[MiddlewareAdapter-1] RequiredPermission: %v", err)
+			user, ok := c.Get("user").(string)
+			if !ok || user == "" {
+				err := utils.ErrTokenInvalid
+				m.logger.Errorf("[MiddlewareAdapter] RequiredPermission: %v", err)
 				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 			}
 
 			if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
-				m.logger.Errorf("[MiddlewareAdapter-2] RequiredPermission: %v", err)
-				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+				m.logger.Errorf("[MiddlewareAdapter] RequiredPermission: %v", err)
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 			}
 
 			keyRolePermission := fmt.Sprintf("role:id:%d", jwtUserData.RoleID)
 			rolePermission, err := m.redisClient.Get(c.Request().Context(), keyRolePermission).Result()
 			if err != nil {
-				m.logger.Errorf("[MiddlewareAdapter-3] RequiredPermission: %v", err)
+				m.logger.Errorf("[MiddlewareAdapter] RequiredPermission: %v", err)
 				if errors.Is(err, redis.Nil) {
-					return c.JSON(http.StatusForbidden, response.ResponseFailed(utils.ACCESS_FORBIDDEN))
+					return c.JSON(http.StatusForbidden, response.ResponseFailed(utils.ErrAccessForbidden.Error()))
 				}
-				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 			}
 
 			if err := json.Unmarshal([]byte(rolePermission), &roleEntity); err != nil {
-				m.logger.Errorf("[MiddlewareAdapter-4] RequiredPermission: %v", err)
-				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+				m.logger.Errorf("[MiddlewareAdapter] RequiredPermission: %v", err)
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 			}
 
 			for _, p := range roleEntity.Permissions {
@@ -139,8 +154,8 @@ func (m *middlewareAdapter) RequiredPermission(requiredPermissions ...string) ec
 			}
 
 			if allowed := helper.HasRequiredPermissions(permissions, requiredPermissions); !allowed {
-				err := errors.New(utils.ACCESS_FORBIDDEN)
-				m.logger.Errorf("[MiddlewareAdapter-5] RequiredPermission: %v", err)
+				err := utils.ErrAccessForbidden
+				m.logger.Errorf("[MiddlewareAdapter] RequiredPermission: %v", err)
 				return c.JSON(http.StatusForbidden, response.ResponseFailed(err.Error()))
 			}
 
@@ -155,8 +170,8 @@ func (m *middlewareAdapter) CheckToken() echo.MiddlewareFunc {
 		return func(c echo.Context) error {
 			authHeader := c.Request().Header.Get("Authorization")
 			if authHeader == "" {
-				err := errors.New(utils.TOKEN_INVALID)
-				m.logger.Errorf("[MiddlewareAdapter-1] CheckToken: %v", err)
+				err := utils.ErrTokenInvalid
+				m.logger.Errorf("[MiddlewareAdapter] CheckToken: %v", err)
 				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 			}
 
@@ -164,27 +179,27 @@ func (m *middlewareAdapter) CheckToken() echo.MiddlewareFunc {
 
 			_, err := m.jwtService.ValidateToken(tokenString)
 			if err != nil {
-				err := errors.New(utils.SESSION_EXPIRED)
-				m.logger.Errorf("[MiddlewareAdapter-2] CheckToken: %v", err)
+				err := utils.ErrSessionExpired
+				m.logger.Errorf("[MiddlewareAdapter] CheckToken: %v", err)
 				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 			}
 
 			keyIdxSession := fmt.Sprintf("user:session:%s", tokenString)
 			getIdxSession, err := m.redisClient.Get(c.Request().Context(), keyIdxSession).Result()
 			if err != nil {
-				m.logger.Errorf("[MiddlewareAdapter-3] CheckToken: %v", err)
+				m.logger.Errorf("[MiddlewareAdapter] CheckToken: %v", err)
 				if errors.Is(err, redis.Nil) {
-					err := errors.New(utils.TOKEN_INVALID)
+					err := utils.ErrTokenInvalid
 					return c.JSON(http.StatusUnauthorized, response.ResponseFailed(err.Error()))
 				}
-				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 			}
 
 			keySession := fmt.Sprintf("user:id:%s:session", getIdxSession)
 			getSession, err := m.redisClient.Get(c.Request().Context(), keySession).Result()
 			if err != nil {
-				m.logger.Errorf("[MiddlewareAdapter-4] CheckToken: %v", err)
-				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+				m.logger.Errorf("[MiddlewareAdapter] CheckToken: %v", err)
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 			}
 
 			c.Set("user", getSession)
@@ -192,7 +207,7 @@ func (m *middlewareAdapter) CheckToken() echo.MiddlewareFunc {
 			// jwtUserData := entity.JwtUserData{}
 			// err = json.Unmarshal([]byte(getSession), &jwtUserData)
 			// if err != nil {
-			// 	m.logger.Errorf("[MiddlewareAdapter-5] CheckToken: %v", err)
+			// 	m.logger.Errorf("[MiddlewareAdapter] CheckToken: %v", err)
 			// 	return c.JSON(http.StatusInternalServerError, response.ResponseFailed(err.Error()))
 			// }
 
@@ -200,12 +215,65 @@ func (m *middlewareAdapter) CheckToken() echo.MiddlewareFunc {
 			// segments := strings.Split(strings.Trim(path, "/"), "/")
 
 			// if strings.ToLower(jwtUserData.RoleName) == "customer" && segments[0] == "admin" {
-			// 	err := errors.New(utils.ACCESS_FORBIDDEN)
-			// 	m.logger.Errorf("[MiddlewareAdapter-6] CheckToken: %v", err)
+			// 	err := utils.ErrAccessForbidden
+			// 	m.logger.Errorf("[MiddlewareAdapter] CheckToken: %v", err)
 			// 	return c.JSON(http.StatusForbidden, response.ResponseFailed(err.Error()))
 			// }
 
 			return next(c)
+		}
+	}
+}
+
+// IdempotencyCreateOrder implements [MiddlewareAdapterInterface].
+func (m *middlewareAdapter) IdempotencyCreateOrder() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			idempotencyKey := c.Request().Header.Get("X-Idempotency-Key")
+			if idempotencyKey == "" {
+				err := utils.ErrIdempotencyKeyRequired
+				m.logger.Errorf("[MiddlewareAdapter] IdempotencyCreateOrder: %v", err)
+				return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
+			}
+
+			redisKey := fmt.Sprintf("idempotency:%s", idempotencyKey)
+
+			success, err := m.redisClient.SetNX(c.Request().Context(), redisKey, "processing", 5*time.Minute).Result()
+			if err != nil {
+				m.logger.Errorf("[MiddlewareAdapter] IdempotencyCreateOrder: %v", err)
+				return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
+			}
+
+			if !success {
+				cachedJSON, err := m.redisClient.Get(c.Request().Context(), redisKey+":response").Result()
+				if err != nil {
+					m.logger.Errorf("[MiddlewareAdapter] IdempotencyCreateOrder: %v", err)
+					if errors.Is(err, redis.Nil) {
+						err := utils.ErrRequestProcessing
+						return c.JSON(http.StatusConflict, response.ResponseFailed(err.Error()))
+					}
+					return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
+				}
+
+				var cachedResponse map[string]any
+				if err := json.Unmarshal([]byte(cachedJSON), &cachedResponse); err != nil {
+					m.logger.Errorf("[MiddlewareAdapter] IdempotencyCreateOrder: %v", err)
+					return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
+				}
+				return c.JSON(http.StatusOK, response.ResponseSuccess(cachedResponse))
+
+			}
+
+			rec := &responseRecorder{ResponseWriter: c.Response().Writer, body: new(bytes.Buffer)}
+			c.Response().Writer = rec
+
+			err = next(c)
+
+			if c.Response().Status == 200 || c.Response().Status == 201 {
+				m.redisClient.Set(c.Request().Context(), redisKey+":response", rec.body.String(), 5*time.Minute)
+			}
+
+			return err
 		}
 	}
 }

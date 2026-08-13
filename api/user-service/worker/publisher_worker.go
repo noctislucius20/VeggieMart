@@ -22,12 +22,12 @@ func StartPublisherWorker() {
 
 	conn, err := config.NewConfig().NewRabbitMQ()
 	if err != nil {
-		customLogger.Fatalf("[PublisherWorker-1] %v", err)
+		customLogger.Fatalf("[PublisherWorker] %v", err)
 	}
 
 	db, err := cfg.ConnectionPostgres(ctx)
 	if err != nil {
-		customLogger.Fatalf("[PublisherWorker-2] %v", err)
+		customLogger.Fatalf("[PublisherWorker] %v", err)
 	}
 
 	outboxRepo := repository.NewOutboxEventRepository(db.DB, customLogger)
@@ -49,5 +49,5 @@ func StartPublisherWorker() {
 
 	conn.Close()
 
-	customLogger.Infof("[PublisherWorker-3] shutting down publisher worker...")
+	customLogger.Infof("[PublisherWorker] shutting down publisher worker...")
 }

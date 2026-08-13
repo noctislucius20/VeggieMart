@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"payment-service/config"
@@ -41,11 +40,14 @@ func (h *httpService) HttpOrderByIdService(orderId int64, jwtUserData entity.Jwt
 
 	if orderFetch.StatusCode != 200 {
 		switch orderFetch.StatusCode {
+		case 403:
+			err := utils.ErrAccessForbidden
+			return nil, err
 		case 404:
-			err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+			err := utils.ErrRelationDataNotFound
 			return nil, err
 		default:
-			err := errors.New(utils.INTERNAL_SERVER_ERROR)
+			err := utils.ErrInternalServerError
 			return nil, err
 		}
 	}

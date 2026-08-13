@@ -23,19 +23,19 @@ func StartConsumerWorker() {
 
 	conn, err := cfg.NewRabbitMQ()
 	if err != nil {
-		customLogger.Fatalf("[StartConsumerWorker-1] %v", err)
+		customLogger.Fatalf("[StartConsumerWorker] %v", err)
 		return
 	}
 
 	db, err := cfg.ConnectionPostgres(ctx)
 	if err != nil {
-		customLogger.Fatalf("[StartConsumerWorker-2] %v", err)
+		customLogger.Fatalf("[StartConsumerWorker] %v", err)
 		return
 	}
 
 	redisClient, err := cfg.NewRedisClient(ctx)
 	if err != nil {
-		customLogger.Fatalf("[StartConsumerWorker-3] %v", err)
+		customLogger.Fatalf("[StartConsumerWorker] %v", err)
 		return
 	}
 
@@ -63,5 +63,5 @@ func StartConsumerWorker() {
 
 	conn.Close()
 
-	customLogger.Infof("[StartConsumerWorker-4] shutting down consumer worker...")
+	customLogger.Infof("[StartConsumerWorker] shutting down consumer worker...")
 }

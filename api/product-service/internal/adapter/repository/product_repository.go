@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"product-service/internal/core/domain/entity"
@@ -58,13 +57,13 @@ func (p *productRepository) UpdateStockProduct(ctx context.Context, products []e
 			Update("stock", gorm.Expr("stock - ?", product.Quantity))
 
 		if tx.Error != nil {
-			p.logger.Errorf("[ProductRepository-1] UpdateProduct: %v", tx.Error)
+			p.logger.Errorf("[ProductRepository] UpdateProduct: %v", tx.Error)
 			return tx.Error
 		}
 
 		if tx.RowsAffected == 0 {
-			err := errors.New(utils.STOCK_UNAVAILABLE)
-			p.logger.Errorf("[ProductRepository-2] UpdateProduct: %v", err)
+			err := utils.ErrStockUnavailable
+			p.logger.Errorf("[ProductRepository] UpdateProduct: %v", err)
 			return err
 		}
 	}
@@ -89,7 +88,7 @@ func (p *productRepository) GetBatchProducts(ctx context.Context, productIds []i
 			Select("id", "image", "name", "sale_price", "weight", "unit", "regular_price").
 			Where("id IN ?", productIds[i:end]).
 			Find(&batchProducts).Error; err != nil {
-			p.logger.Errorf("[ProductRepository-1] GetBatchProducts: %v", err)
+			p.logger.Errorf("[ProductRepository] GetBatchProducts: %v", err)
 			return nil, err
 		}
 
@@ -97,8 +96,8 @@ func (p *productRepository) GetBatchProducts(ctx context.Context, productIds []i
 	}
 
 	if len(modelProducts) == 0 {
-		err := errors.New(utils.DATA_NOT_FOUND)
-		p.logger.Errorf("[ProductRepository-2] GetBatchProducts: %v", err)
+		err := utils.ErrDataNotFound
+		p.logger.Errorf("[ProductRepository] GetBatchProducts: %v", err)
 		return nil, err
 	}
 
@@ -129,13 +128,13 @@ func (p *productRepository) DeleteProduct(ctx context.Context, productId int64) 
 		Where("id = ? OR parent_id = ?", productId, productId).
 		Delete(&modelProduct)
 	if tx.Error != nil {
-		p.logger.Errorf("[ProductRepository-1] DeleteProduct: %v", tx.Error)
+		p.logger.Errorf("[ProductRepository] DeleteProduct: %v", tx.Error)
 		return tx.Error
 	}
 
 	if tx.RowsAffected == 0 {
-		err := errors.New(utils.DATA_NOT_FOUND)
-		p.logger.Errorf("[ProductRepository-2] DeleteProduct: %v", err)
+		err := utils.ErrDataNotFound
+		p.logger.Errorf("[ProductRepository] DeleteProduct: %v", err)
 		return err
 	}
 
@@ -165,13 +164,13 @@ func (p *productRepository) UpdateProduct(ctx context.Context, req entity.Produc
 		Where("id = ? AND parent_id IS NULL", req.ID).
 		Updates(&modelProduct)
 	if tx.Error != nil {
-		p.logger.Errorf("[ProductRepository-1] UpdateProduct: %v", tx.Error)
+		p.logger.Errorf("[ProductRepository] UpdateProduct: %v", tx.Error)
 		return tx.Error
 	}
 
 	if tx.RowsAffected == 0 {
-		err := errors.New(utils.DATA_NOT_FOUND)
-		p.logger.Errorf("[ProductRepository-2] UpdateProduct: %v", err)
+		err := utils.ErrDataNotFound
+		p.logger.Errorf("[ProductRepository] UpdateProduct: %v", err)
 		return err
 	}
 
@@ -180,7 +179,7 @@ func (p *productRepository) UpdateProduct(ctx context.Context, req entity.Produc
 		if err := db.WithContext(ctx).
 			Where("parent_id = ?", req.ID).
 			Delete(&model.Product{}).Error; err != nil {
-			p.logger.Errorf("[ProductRepository-3] UpdateProduct: %v", err)
+			p.logger.Errorf("[ProductRepository] UpdateProduct: %v", err)
 			return err
 		}
 
@@ -203,7 +202,7 @@ func (p *productRepository) UpdateProduct(ctx context.Context, req entity.Produc
 
 		if err := db.WithContext(ctx).
 			CreateInBatches(&modelProductChild, 50).Error; err != nil {
-			p.logger.Errorf("[ProductRepository-4] UpdateProduct: %v", err)
+			p.logger.Errorf("[ProductRepository] UpdateProduct: %v", err)
 			return err
 		}
 	}
@@ -232,7 +231,7 @@ func (p *productRepository) CreateProduct(ctx context.Context, req entity.Produc
 	)
 
 	if err := db.WithContext(ctx).Create(&modelProduct).Error; err != nil {
-		p.logger.Errorf("[ProductRepository-1] CreateProduct: %v", err)
+		p.logger.Errorf("[ProductRepository] CreateProduct: %v", err)
 		return 0, err
 	}
 
@@ -257,7 +256,7 @@ func (p *productRepository) CreateProduct(ctx context.Context, req entity.Produc
 		}
 
 		if err := db.WithContext(ctx).CreateInBatches(&modelProductChild, 50).Error; err != nil {
-			p.logger.Errorf("[ProductRepository-2] CreateProduct: %v", err)
+			p.logger.Errorf("[ProductRepository] CreateProduct: %v", err)
 			return 0, err
 		}
 	}
@@ -277,13 +276,13 @@ func (p *productRepository) GetProductById(ctx context.Context, productId int64)
 		Order("id ASC").
 		Omit("updated_at", "deleted_at").
 		Find(&modelProducts, "id = ? OR parent_id = ?", productId, productId).Error; err != nil {
-		p.logger.Errorf("[ProductRepository-1] GetProductById: %v", err)
+		p.logger.Errorf("[ProductRepository] GetProductById: %v", err)
 		return nil, err
 	}
 
 	if len(modelProducts) == 0 || (len(modelProducts) > 0 && modelProducts[0].ParentID != nil) {
-		err := errors.New(utils.DATA_NOT_FOUND)
-		p.logger.Errorf("[ProductRepository-2] GetProductById: %v", err)
+		err := utils.ErrDataNotFound
+		p.logger.Errorf("[ProductRepository] GetProductById: %v", err)
 		return nil, err
 	}
 
@@ -377,7 +376,7 @@ func (p *productRepository) GetAllProducts(ctx context.Context, query entity.Que
 	}
 
 	if err := sqlMain.Count(&countData).Error; err != nil {
-		p.logger.Errorf("[ProductRepository-1] GetAllProducts: %v", err)
+		p.logger.Errorf("[ProductRepository] GetAllProducts: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -386,7 +385,7 @@ func (p *productRepository) GetAllProducts(ctx context.Context, query entity.Que
 		Limit(int(query.Limit)).
 		Offset(int(offset)).
 		Find(&productsDto).Error; err != nil {
-		p.logger.Errorf("[ProductRepository-2] GetAllProducts: %v", err)
+		p.logger.Errorf("[ProductRepository] GetAllProducts: %v", err)
 		return nil, 0, 0, err
 	}
 

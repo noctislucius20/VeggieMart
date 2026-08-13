@@ -51,7 +51,7 @@ func (o *options) CallURL(method string, url string, header map[string]string, p
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(payload))
 	if err != nil {
 		o.logger.Errorj(log.JSON{
-			"message": "[HttpClient-1] CallURL: failed to pre request client http",
+			"message": "[HttpClient] CallURL: failed to pre request client http",
 			"error":   err.Error(),
 		})
 		return nil, err
@@ -69,7 +69,7 @@ func (o *options) CallURL(method string, url string, header map[string]string, p
 	resp, err := o.http.Do(req)
 	if err != nil {
 		o.logger.Errorj(log.JSON{
-			"message": "[HttpClient-2] CallURL: failed to call request http",
+			"message": "[HttpClient] CallURL: failed to call request http",
 			"error":   err.Error(),
 		})
 		return nil, err

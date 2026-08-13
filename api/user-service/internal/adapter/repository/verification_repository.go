@@ -48,7 +48,7 @@ func (v *verificationTokenRepository) DeleteVerificationToken(ctx context.Contex
 	)
 
 	if err := db.WithContext(ctx).Delete(&modelVerificationToken).Error; err != nil {
-		log.Errorf("[VerificationTokenRepository-3] DeleteVerificationToken: %v", err)
+		log.Errorf("[VerificationTokenRepository] DeleteVerificationToken: %v", err)
 		return err
 	}
 
@@ -80,9 +80,9 @@ func (v *verificationTokenRepository) GetDataByToken(ctx context.Context, token 
 		Where("verification_tokens.token = ?", token).
 		Where("roles.id = ?", 2).
 		First(&tokenDTO).Error; err != nil {
-		log.Errorf("[VerificationTokenRepository-1] GetDataByToken: %v", err)
+		log.Errorf("[VerificationTokenRepository] GetDataByToken: %v", err)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err := errors.New(utils.TOKEN_INVALID)
+			err := utils.ErrTokenInvalid
 			return nil, err
 		}
 		return nil, err
@@ -116,7 +116,7 @@ func (v *verificationTokenRepository) CreateVerificationToken(ctx context.Contex
 	)
 
 	if err := db.WithContext(ctx).Create(&modelVerificationToken).Error; err != nil {
-		log.Errorf("[VerificationTokenRepository-1] CreateVerificationToken: %v", err)
+		log.Errorf("[VerificationTokenRepository] CreateVerificationToken: %v", err)
 		return err
 	}
 

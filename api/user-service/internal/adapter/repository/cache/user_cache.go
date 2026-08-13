@@ -59,7 +59,7 @@ func (u *userCache) DeleteUserCache(ctx context.Context, id int64) error {
 	)
 
 	if err := helper.RedisBulkGet(ctx, u.redisClient, keys, &verifyToken, &session, &user); err != nil {
-		u.logger.Errorf("[UserCache-1] DeleteUserCache: %v", err)
+		u.logger.Errorf("[UserCache] DeleteUserCache: %v", err)
 		return err
 	}
 
@@ -69,7 +69,7 @@ func (u *userCache) DeleteUserCache(ctx context.Context, id int64) error {
 	delKeys = append(delKeys, keys...)
 
 	if err := u.redisClient.Del(ctx, delKeys...).Err(); err != nil {
-		u.logger.Errorf("[UserCache-2] DeleteUserCache: %v", err)
+		u.logger.Errorf("[UserCache] DeleteUserCache: %v", err)
 		return err
 	}
 
@@ -88,8 +88,8 @@ func (u *userCache) GetProfileById(ctx context.Context, id int64) (*entity.UserE
 	if err == nil {
 		// if key exists but value null, return data not found error
 		if val == "null" {
-			err := errors.New(utils.DATA_NOT_FOUND)
-			u.logger.Errorf("[UserCache-1] GetProfileById: %v", err)
+			err := utils.ErrDataNotFound
+			u.logger.Errorf("[UserCache] GetProfileById: %v", err)
 			return nil, err
 		}
 
@@ -100,13 +100,13 @@ func (u *userCache) GetProfileById(ctx context.Context, id int64) (*entity.UserE
 
 	profileEntity, err := u.repoUser.GetProfileById(ctx, id)
 	if err != nil {
-		if err.Error() == utils.DATA_NOT_FOUND {
+		if errors.Is(err, utils.ErrDataNotFound) {
 			if err := u.redisClient.Set(ctx, key, "null", 10*time.Minute); err != nil {
-				u.logger.Errorf("[UserCache-2] GetProfileById: %v", err)
+				u.logger.Errorf("[UserCache] GetProfileById: %v", err)
 			}
 		}
 
-		u.logger.Errorf("[UserCache-3] GetProfileById: %v", err)
+		u.logger.Errorf("[UserCache] GetProfileById: %v", err)
 		return nil, err
 	}
 
@@ -116,7 +116,7 @@ func (u *userCache) GetProfileById(ctx context.Context, id int64) (*entity.UserE
 	jsonData, _ := json.Marshal(profile)
 	ttl := 10*time.Minute + time.Duration(rand.Intn(120))*time.Second
 	if err := u.redisClient.Set(ctx, key, jsonData, ttl).Err(); err != nil {
-		u.logger.Errorf("[UserCache-4] GetProfileById: %v", err)
+		u.logger.Errorf("[UserCache] GetProfileById: %v", err)
 	}
 
 	return &profile, nil
@@ -134,8 +134,8 @@ func (u *userCache) GetCustomerById(ctx context.Context, id int64) (*entity.User
 	if err == nil {
 		// if key exists but value null, return data not found error
 		if val == "null" {
-			err := errors.New(utils.DATA_NOT_FOUND)
-			u.logger.Errorf("[UserCache-1] GetCustomerById: %v", err)
+			err := utils.ErrDataNotFound
+			u.logger.Errorf("[UserCache] GetCustomerById: %v", err)
 			return nil, err
 		}
 
@@ -146,13 +146,13 @@ func (u *userCache) GetCustomerById(ctx context.Context, id int64) (*entity.User
 
 	userEntity, err := u.repoUser.GetCustomerById(ctx, id)
 	if err != nil {
-		if err.Error() == utils.DATA_NOT_FOUND {
+		if errors.Is(err, utils.ErrDataNotFound) {
 			if err := u.redisClient.Set(ctx, key, "null", 10*time.Minute); err != nil {
-				u.logger.Errorf("[UserCache-2] GetCustomerById: %v", err)
+				u.logger.Errorf("[UserCache] GetCustomerById: %v", err)
 			}
 		}
 
-		u.logger.Errorf("[UserCache-3] GetCustomerById: %v", err)
+		u.logger.Errorf("[UserCache] GetCustomerById: %v", err)
 		return nil, err
 	}
 
@@ -162,7 +162,7 @@ func (u *userCache) GetCustomerById(ctx context.Context, id int64) (*entity.User
 	jsonData, _ := json.Marshal(user)
 	ttl := 10*time.Minute + time.Duration(rand.Intn(120))*time.Second
 	if err := u.redisClient.Set(ctx, key, jsonData, ttl).Err(); err != nil {
-		u.logger.Errorf("[UserCache-4] GetCustomerById: %v", err)
+		u.logger.Errorf("[UserCache] GetCustomerById: %v", err)
 	}
 
 	return &user, nil
@@ -176,7 +176,7 @@ func (u *userCache) SetUserSession(ctx context.Context, session entity.SessionEn
 
 	sessionDataJson, err := json.Marshal(session)
 	if err != nil {
-		u.logger.Errorf("[UserCache-1] SetUserSession: %v", err)
+		u.logger.Errorf("[UserCache] SetUserSession: %v", err)
 		return err
 	}
 
@@ -185,15 +185,15 @@ func (u *userCache) SetUserSession(ctx context.Context, session entity.SessionEn
 	pipe := u.redisClient.Pipeline()
 
 	if err := pipe.Set(ctx, key, session.UserID, ttl).Err(); err != nil {
-		u.logger.Errorf("[UserCache-2] SetUserSession: %v", err)
+		u.logger.Errorf("[UserCache] SetUserSession: %v", err)
 		return err
 	}
 	if err := pipe.Set(ctx, fmt.Sprintf("user:id:%d:session", session.UserID), sessionDataJson, ttl).Err(); err != nil {
-		u.logger.Errorf("[UserCache-3] SetUserSession: %v", err)
+		u.logger.Errorf("[UserCache] SetUserSession: %v", err)
 		return err
 	}
 	if _, err = pipe.Exec(ctx); err != nil {
-		u.logger.Errorf("[UserCache-4] SetUserSession: %v", err)
+		u.logger.Errorf("[UserCache] SetUserSession: %v", err)
 		return err
 	}
 
@@ -211,8 +211,8 @@ func (u *userCache) GetDataByToken(ctx context.Context, token string) (*entity.V
 	if valKey, err := u.redisClient.Get(ctx, key).Result(); err == nil {
 		// if key exists but value null, return data not found error
 		if valKey == "null" {
-			err := errors.New(utils.DATA_NOT_FOUND)
-			u.logger.Errorf("[UserCache-1] GetDataByToken: %v", err)
+			err := utils.ErrDataNotFound
+			u.logger.Errorf("[UserCache] GetDataByToken: %v", err)
 
 			return nil, err
 		}
@@ -225,13 +225,13 @@ func (u *userCache) GetDataByToken(ctx context.Context, token string) (*entity.V
 
 	tokenEntity, err := u.repoToken.GetDataByToken(ctx, token)
 	if err != nil {
-		if err.Error() == utils.TOKEN_INVALID {
+		if errors.Is(err, utils.ErrTokenInvalid) {
 			if err := u.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
-				u.logger.Errorf("[UserCache-2] GetDataByToken: %v", err)
+				u.logger.Errorf("[UserCache] GetDataByToken: %v", err)
 			}
 		}
 
-		u.logger.Errorf("[UserCache-3] GetDataByToken: %v", err)
+		u.logger.Errorf("[UserCache] GetDataByToken: %v", err)
 		return nil, err
 	}
 
@@ -242,13 +242,13 @@ func (u *userCache) GetDataByToken(ctx context.Context, token string) (*entity.V
 	ttl := 10*time.Minute + time.Duration(rand.Intn(120))*time.Second
 	pipe := u.redisClient.Pipeline()
 	if err := pipe.Set(ctx, key, tokenData.UserID, ttl).Err(); err != nil {
-		u.logger.Errorf("[UserCache-4] GetDataByToken: %v", err)
+		u.logger.Errorf("[UserCache] GetDataByToken: %v", err)
 	}
 	if err := pipe.Set(ctx, fmt.Sprintf("user:id:%d:verifytoken", tokenData.UserID), jsonData, ttl).Err(); err != nil {
-		u.logger.Errorf("[UserCache-5] GetDataByToken: %v", err)
+		u.logger.Errorf("[UserCache] GetDataByToken: %v", err)
 	}
 	if _, err = pipe.Exec(ctx); err != nil {
-		u.logger.Errorf("[UserCache-6] GetDataByToken: %v", err)
+		u.logger.Errorf("[UserCache] GetDataByToken: %v", err)
 	}
 
 	return &tokenData, nil
@@ -265,8 +265,8 @@ func (u *userCache) GetUserByEmail(ctx context.Context, email string) (*entity.U
 	if valKey, err := u.redisClient.Get(ctx, key).Result(); err == nil {
 		// if key exists but value null, return data not found error
 		if valKey == "null" {
-			err := errors.New(utils.DATA_NOT_FOUND)
-			u.logger.Errorf("[UserCache-1] GetUserByEmail: %v", err)
+			err := utils.ErrDataNotFound
+			u.logger.Errorf("[UserCache] GetUserByEmail: %v", err)
 
 			return nil, err
 		}
@@ -279,13 +279,13 @@ func (u *userCache) GetUserByEmail(ctx context.Context, email string) (*entity.U
 
 	userEntity, err := u.repoUser.GetUserByEmail(ctx, email)
 	if err != nil {
-		if err.Error() == utils.DATA_NOT_FOUND {
+		if errors.Is(err, utils.ErrDataNotFound) {
 			if err := u.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
-				u.logger.Errorf("[UserCache-2] GetUserByEmail: %v", err)
+				u.logger.Errorf("[UserCache] GetUserByEmail: %v", err)
 			}
 		}
 
-		u.logger.Errorf("[UserCache-3] GetUserByEmail: %v", err)
+		u.logger.Errorf("[UserCache] GetUserByEmail: %v", err)
 		return nil, err
 	}
 
@@ -296,13 +296,13 @@ func (u *userCache) GetUserByEmail(ctx context.Context, email string) (*entity.U
 	ttl := 10*time.Minute + time.Duration(rand.Intn(120))*time.Second
 	pipe := u.redisClient.Pipeline()
 	if err := pipe.Set(ctx, key, user.ID, ttl).Err(); err != nil {
-		u.logger.Errorf("[UserCache-4] GetUserByEmail: %v", err)
+		u.logger.Errorf("[UserCache] GetUserByEmail: %v", err)
 	}
 	if err := pipe.Set(ctx, fmt.Sprintf("user:id:%d:email", user.ID), jsonData, ttl).Err(); err != nil {
-		u.logger.Errorf("[UserCache-5] GetUserByEmail: %v", err)
+		u.logger.Errorf("[UserCache] GetUserByEmail: %v", err)
 	}
 	if _, err = pipe.Exec(ctx); err != nil {
-		u.logger.Errorf("[UserCache-6] GetUserByEmail: %v", err)
+		u.logger.Errorf("[UserCache] GetUserByEmail: %v", err)
 	}
 
 	return &user, nil

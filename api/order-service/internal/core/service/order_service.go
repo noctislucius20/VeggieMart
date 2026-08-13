@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"order-service/config"
 	"order-service/internal/adapter/repository"
@@ -85,7 +84,7 @@ func (o *orderService) GetOrderByOrderCode(ctx context.Context, orderCode string
 
 		return nil
 	}); err != nil {
-		o.logger.Errorf("[OrderService-1] GetOrderByOrderCode: %v", err)
+		o.logger.Errorf("[OrderService] GetOrderByOrderCode: %v", err)
 		return nil, err
 	}
 
@@ -96,7 +95,7 @@ func (o *orderService) GetOrderByOrderCode(ctx context.Context, orderCode string
 func (o *orderService) UpdateOrderStatus(ctx context.Context, req entity.OrderEntity, userData string) error {
 	var (
 		publishEmailUpdateStatus   = o.cfg.PublisherName.EmailUpdateOrderStatus
-		publishElasticUpdateStatus = o.cfg.PublisherName.OrderUpdateStatus
+		publishElasticUpdateStatus = o.cfg.PublisherName.ElasticOrderUpdateStatus
 		outboxEventEntities        []entity.OutboxEventEntity
 	)
 
@@ -110,14 +109,14 @@ func (o *orderService) UpdateOrderStatus(ctx context.Context, req entity.OrderEn
 
 		if statusReq != "CANCELED" {
 			nextStatus := map[string]string{
-				"PENDING":   "CONFIRMED",
-				"CONFIRMED": "PROCESS",
-				"PROCESS":   "SENDING",
-				"SENDING":   "DONE",
+				"PENDING":    "CONFIRMED",
+				"CONFIRMED":  "PROCESSING",
+				"PROCESSING": "SENDING",
+				"SENDING":    "DONE",
 			}
 
 			if expected, ok := nextStatus[orderEntity.Status]; ok && statusReq != expected {
-				return errors.New(utils.INVALID_STATUS_TRANSITION)
+				return utils.ErrInvalidStatusTransition
 			}
 		}
 
@@ -130,13 +129,15 @@ func (o *orderService) UpdateOrderStatus(ctx context.Context, req entity.OrderEn
 
 		payloadMessage := fmt.Sprintf("Hello,\n\nYour order with ID %s has been updated with status: %s.\n\nThank you for shopping with us!", orderEntity.OrderCode, orderEntity.Status)
 
+		// consumed by notification service
 		publishEmailPayload := map[string]any{
-			"receiver_email":    orderEntity.BuyerEmail,
-			"message":           payloadMessage,
-			"subject":           "Update Status Order",
-			"type":              "UPDATE_STATUS",
-			"receiver_id":       orderEntity.BuyerID,
-			"notification_type": "EMAIL",
+			"receiver_email":       orderEntity.BuyerEmail,
+			"message":              payloadMessage,
+			"subject":              "Update Status Order",
+			"notification_type":    "orders",
+			"notification_type_id": orderEntity.ID,
+			"receiver_id":          orderEntity.BuyerID,
+			"notification_method":  "EMAIL",
 		}
 
 		jsonEmailUpdateStatus, _ := json.Marshal(publishEmailPayload)
@@ -147,13 +148,15 @@ func (o *orderService) UpdateOrderStatus(ctx context.Context, req entity.OrderEn
 			AggregateID: fmt.Sprintf("%d", orderEntity.ID),
 		})
 
+		// consumed by notification service
 		publishPushNotifPayload := map[string]any{
-			"receiver_email":    "",
-			"message":           payloadMessage,
-			"subject":           "Update Status Order",
-			"type":              "UPDATE_STATUS",
-			"receiver_id":       orderEntity.BuyerID,
-			"notification_type": "PUSH",
+			"receiver_email":       "",
+			"message":              payloadMessage,
+			"subject":              "Update Status Order",
+			"notification_type":    "orders",
+			"notification_type_id": orderEntity.ID,
+			"receiver_id":          orderEntity.BuyerID,
+			"notification_method":  "PUSH",
 		}
 
 		jsonPushNotif, _ := json.Marshal(publishPushNotifPayload)
@@ -164,6 +167,7 @@ func (o *orderService) UpdateOrderStatus(ctx context.Context, req entity.OrderEn
 			AggregateID: fmt.Sprintf("%d", orderEntity.ID),
 		})
 
+		// consumed by order elastic
 		publishElasticPayload := map[string]any{
 			"id":      orderEntity.ID,
 			"status":  orderEntity.Status,
@@ -188,7 +192,7 @@ func (o *orderService) UpdateOrderStatus(ctx context.Context, req entity.OrderEn
 
 		return nil
 	}); err != nil {
-		o.logger.Errorf("[OrderService-1] UpdateOrderStatus: %v", err)
+		o.logger.Errorf("[OrderService] UpdateOrderStatus: %v", err)
 		return err
 	}
 
@@ -284,7 +288,7 @@ func (o *orderService) CreateOrder(ctx context.Context, req entity.OrderEntity, 
 		return nil
 	}); err != nil {
 		o.cacheOrder.DeleteOrderCache(ctx, orderId, "")
-		o.logger.Errorf("[OrderService-1] CreateOrder: %v", err)
+		o.logger.Errorf("[OrderService] CreateOrder: %v", err)
 		return 0, "", err
 	}
 
@@ -312,7 +316,7 @@ func (o *orderService) GetAllOrders(ctx context.Context, query entity.OrderQuery
 
 		return nil
 	}); err != nil {
-		o.logger.Errorf("[OrderService-1] GetAllOrders: %v", err)
+		o.logger.Errorf("[OrderService] GetAllOrders: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -329,6 +333,7 @@ func (o *orderService) GetOrderById(ctx context.Context, orderId int64, jwtUserD
 			return err
 		}
 
+		fmt.Println(roleEntity.Name)
 		switch strings.ToLower(roleEntity.Name) {
 		case "customer": // requested by customer
 			orderEntity, err := o.cacheOrder.GetOrderById(txCtx, orderId, jwtUserData.UserID)
@@ -348,7 +353,7 @@ func (o *orderService) GetOrderById(ctx context.Context, orderId int64, jwtUserD
 
 		return nil
 	}); err != nil {
-		o.logger.Errorf("[OrderService-1] GetOrderById: %v", err)
+		o.logger.Errorf("[OrderService] GetOrderById: %v", err)
 		return nil, err
 	}
 
@@ -376,7 +381,7 @@ func (o *orderService) GetAllOrdersAdmin(ctx context.Context, query entity.Order
 
 		return nil
 	}); err != nil {
-		o.logger.Errorf("[OrderService-1] GetAllOrdersAdmin: %v", err)
+		o.logger.Errorf("[OrderService] GetAllOrdersAdmin: %v", err)
 		return nil, 0, 0, err
 	}
 

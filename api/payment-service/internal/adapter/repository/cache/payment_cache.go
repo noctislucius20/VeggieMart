@@ -43,9 +43,9 @@ func (p *paymentCache) GetRoleById(ctx context.Context, id int64) (*entity.RoleE
 	keyRolePermission := fmt.Sprintf("role:id:%d", id)
 	rolePermission, err := p.redisClient.Get(ctx, keyRolePermission).Result()
 	if err != nil {
-		p.logger.Errorf("[OrderCache-1] GetRoleById: %v", err)
+		p.logger.Errorf("[OrderCache] GetRoleById: %v", err)
 		if errors.Is(err, redis.Nil) {
-			return nil, errors.New(utils.RELATION_DATA_NOT_FOUND)
+			return nil, utils.ErrRelationDataNotFound
 		}
 		return nil, err
 	}
@@ -67,25 +67,31 @@ func (p *paymentCache) GetPaymentById(ctx context.Context, paymentId int64, user
 	if err == nil {
 		// if key exists but value null, return data not found error
 		if val == "null" {
-			err := errors.New(utils.DATA_NOT_FOUND)
-			p.logger.Errorf("[PaymentCache-1] GetPaymentById: %v", err)
+			err := utils.ErrDataNotFound
+			p.logger.Errorf("[PaymentCache] GetPaymentById: %v", err)
 			return nil, err
 		}
 
 		json.Unmarshal([]byte(val), &payment)
+
+		if userId != 0 && payment.UserID != userId {
+			err := utils.ErrAccessForbidden
+			p.logger.Errorf("[PaymentCache] GetPaymentById: %v", err)
+			return nil, err
+		}
 
 		return &payment, nil
 	}
 
 	paymentEntity, err := p.repoPayment.GetPaymentById(ctx, paymentId, userId)
 	if err != nil {
-		if err.Error() == utils.DATA_NOT_FOUND {
+		if errors.Is(err, utils.ErrDataNotFound) {
 			if err := p.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
-				p.logger.Errorf("[PaymentCache-2] GetPaymentById: %v", err)
+				p.logger.Errorf("[PaymentCache] GetPaymentById: %v", err)
 			}
 		}
 
-		p.logger.Errorf("[PaymentCache-3] GetPaymentById: %v", err)
+		p.logger.Errorf("[PaymentCache] GetPaymentById: %v", err)
 		return nil, err
 	}
 
@@ -95,7 +101,7 @@ func (p *paymentCache) GetPaymentById(ctx context.Context, paymentId int64, user
 	jsonData, _ := json.Marshal(payment)
 	ttl := 10*time.Minute + time.Duration(rand.Intn(120))*time.Second
 	if err := p.redisClient.Set(ctx, key, jsonData, ttl).Err(); err != nil {
-		p.logger.Errorf("[PaymentCache-4] GetPaymentById: %v", err)
+		p.logger.Errorf("[PaymentCache] GetPaymentById: %v", err)
 	}
 
 	return &payment, nil
@@ -113,25 +119,31 @@ func (p *paymentCache) GetPaymentByOrderId(ctx context.Context, orderId int64, u
 	if err == nil {
 		// if key exists but value null, return data not found error
 		if val == "null" {
-			err := errors.New(utils.DATA_NOT_FOUND)
-			p.logger.Errorf("[PaymentCache-1] GetPaymentByOrderId: %v", err)
+			err := utils.ErrDataNotFound
+			p.logger.Errorf("[PaymentCache] GetPaymentByOrderId: %v", err)
 			return nil, err
 		}
 
 		json.Unmarshal([]byte(val), &payment)
+
+		if userId != 0 && payment.UserID != userId {
+			err := utils.ErrAccessForbidden
+			p.logger.Errorf("[PaymentCache] GetPaymentByOrderId: %v", err)
+			return nil, err
+		}
 
 		return &payment, nil
 	}
 
 	paymentEntity, err := p.repoPayment.GetPaymentByOrderId(ctx, orderId, userId)
 	if err != nil {
-		if err.Error() == utils.DATA_NOT_FOUND {
+		if errors.Is(err, utils.ErrDataNotFound) {
 			if err := p.redisClient.Set(ctx, key, "null", 1*time.Minute); err != nil {
-				p.logger.Errorf("[PaymentCache-2] GetPaymentByOrderId: %v", err)
+				p.logger.Errorf("[PaymentCache] GetPaymentByOrderId: %v", err)
 			}
 		}
 
-		p.logger.Errorf("[PaymentCache-3] GetPaymentByOrderId: %v", err)
+		p.logger.Errorf("[PaymentCache] GetPaymentByOrderId: %v", err)
 		return nil, err
 	}
 
@@ -141,7 +153,7 @@ func (p *paymentCache) GetPaymentByOrderId(ctx context.Context, orderId int64, u
 	jsonData, _ := json.Marshal(payment)
 	ttl := 10*time.Minute + time.Duration(rand.Intn(120))*time.Second
 	if err := p.redisClient.Set(ctx, key, jsonData, ttl).Err(); err != nil {
-		p.logger.Errorf("[PaymentCache-4] GetPaymentByOrderId: %v", err)
+		p.logger.Errorf("[PaymentCache] GetPaymentByOrderId: %v", err)
 	}
 
 	return &payment, nil
@@ -157,7 +169,7 @@ func (p *paymentCache) DeletePaymentCache(ctx context.Context, id int64, orderId
 	)
 
 	if err := p.redisClient.Del(ctx, delKeys...).Err(); err != nil {
-		p.logger.Errorf("[PaymentCache-1] DeletePaymentCache: %v", err)
+		p.logger.Errorf("[PaymentCache] DeletePaymentCache: %v", err)
 		return err
 	}
 

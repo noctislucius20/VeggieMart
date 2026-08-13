@@ -63,7 +63,7 @@ func (p *productService) UpdateStockProduct(ctx context.Context, products []enti
 
 		return nil
 	}); err != nil {
-		p.logger.Errorf("[ProductService-1] UpdateStockProduct: %v", err)
+		p.logger.Errorf("[ProductService] UpdateStockProduct: %v", err)
 		return err
 	}
 
@@ -84,7 +84,7 @@ func (p *productService) GetBatchProducts(ctx context.Context, productIds []int6
 
 		return nil
 	}); err != nil {
-		p.logger.Errorf("[ProductService-1] GetBatchProducts: %v", err)
+		p.logger.Errorf("[ProductService] GetBatchProducts: %v", err)
 		return nil, err
 	}
 
@@ -102,8 +102,8 @@ func (p *productService) CreateProduct(ctx context.Context, req entity.ProductEn
 	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
 		categoryEntity, err := p.categoryService.GetCategoryBySlug(txCtx, req.CategorySlug)
 		if err != nil {
-			if err.Error() == utils.DATA_NOT_FOUND {
-				err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+			if errors.Is(err, utils.ErrDataNotFound) {
+				err := utils.ErrRelationDataNotFound
 				return err
 			}
 			return err
@@ -141,7 +141,7 @@ func (p *productService) CreateProduct(ctx context.Context, req entity.ProductEn
 
 		return nil
 	}); err != nil {
-		p.logger.Errorf("[ProductService-1] CreateProduct: %v", err)
+		p.logger.Errorf("[ProductService] CreateProduct: %v", err)
 		return 0, err
 	}
 
@@ -170,7 +170,7 @@ func (p *productService) DeleteProduct(ctx context.Context, productId int64) err
 
 		return nil
 	}); err != nil {
-		p.logger.Errorf("[ProductService-1] DeleteProduct: %v", err)
+		p.logger.Errorf("[ProductService] DeleteProduct: %v", err)
 		return err
 	}
 
@@ -182,8 +182,8 @@ func (p *productService) GetAllProducts(ctx context.Context, query entity.QueryS
 	products, countData, totalPages, err := p.repoElastic.SearchProductElastic(ctx, query)
 	if err == nil {
 		if err := p.getAllProductsCategory(ctx, products); err != nil {
-			if err.Error() == utils.DATA_NOT_FOUND {
-				err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+			if errors.Is(err, utils.ErrDataNotFound) {
+				err := utils.ErrRelationDataNotFound
 				return nil, 0, 0, err
 			}
 		}
@@ -205,7 +205,7 @@ func (p *productService) GetAllProducts(ctx context.Context, query entity.QueryS
 
 		return nil
 	}); err != nil {
-		p.logger.Errorf("[ProductService-1] GetAllProducts: %v", err)
+		p.logger.Errorf("[ProductService] GetAllProducts: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -226,8 +226,8 @@ func (p *productService) GetProductById(ctx context.Context, productId int64) (*
 
 		categoryEntity, err := p.categoryService.GetCategoryById(txCtx, productEntity.CategoryID)
 		if err != nil {
-			if err.Error() == utils.DATA_NOT_FOUND {
-				err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+			if errors.Is(err, utils.ErrDataNotFound) {
+				err := utils.ErrRelationDataNotFound
 				return err
 			}
 			return err
@@ -240,7 +240,7 @@ func (p *productService) GetProductById(ctx context.Context, productId int64) (*
 
 		return nil
 	}); err != nil {
-		p.logger.Errorf("[ProductService-1] GetProductById: %v", err)
+		p.logger.Errorf("[ProductService] GetProductById: %v", err)
 		return nil, err
 	}
 
@@ -254,8 +254,8 @@ func (p *productService) UpdateProduct(ctx context.Context, req entity.ProductEn
 	if err := p.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
 		categoryEntity, err := p.categoryService.GetCategoryBySlug(txCtx, req.CategorySlug)
 		if err != nil {
-			if err.Error() == utils.DATA_NOT_FOUND {
-				err := errors.New(utils.RELATION_DATA_NOT_FOUND)
+			if errors.Is(err, utils.ErrDataNotFound) {
+				err := utils.ErrRelationDataNotFound
 				return err
 			}
 			return err
@@ -282,7 +282,7 @@ func (p *productService) UpdateProduct(ctx context.Context, req entity.ProductEn
 
 		return nil
 	}); err != nil {
-		p.logger.Errorf("[ProductService-1] UpdateProduct: %v", err)
+		p.logger.Errorf("[ProductService] UpdateProduct: %v", err)
 		return err
 	}
 

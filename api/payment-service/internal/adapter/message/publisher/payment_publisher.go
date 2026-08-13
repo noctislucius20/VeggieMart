@@ -2,7 +2,6 @@ package publisher
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"payment-service/internal/adapter/repository"
 	"payment-service/internal/core/domain/entity"
@@ -80,7 +79,7 @@ func (s *startPublisherWorker) startPoller(ctx context.Context, jobs chan<- enti
 
 				return nil
 			}); err != nil {
-				s.logger.Errorf("[StartPublisherWorker-1] startPoller: %v", err)
+				s.logger.Errorf("[StartPublisherWorker] startPoller: %v", err)
 				time.Sleep(idleDelay)
 				continue
 			}
@@ -104,14 +103,14 @@ func (s *startPublisherWorker) startPoller(ctx context.Context, jobs chan<- enti
 func (s *startPublisherWorker) startPublisher(ctx context.Context, jobs <-chan entity.OutboxEventEntity) {
 	ch, err := s.conn.Channel()
 	if err != nil {
-		s.logger.Fatalf("[StartPublisherWorker-1] startPublisher: %v", err)
+		s.logger.Fatalf("[StartPublisherWorker] startPublisher: %v", err)
 		return
 	}
 
 	defer ch.Close()
 
 	if err := ch.Confirm(false); err != nil {
-		s.logger.Fatalf("[StartPublisherWorker-2] startPublisher: %v", err)
+		s.logger.Fatalf("[StartPublisherWorker] startPublisher: %v", err)
 		return
 	}
 
@@ -123,12 +122,12 @@ func (s *startPublisherWorker) startPublisher(ctx context.Context, jobs <-chan e
 			return
 		case outbox, ok := <-jobs:
 			if !ok {
-				s.logger.Infof("[StartPublisherWorker-3] startPublisher: job channel closed")
+				s.logger.Infof("[StartPublisherWorker] startPublisher: job channel closed")
 				continue
 			}
 
 			if _, err = ch.QueueDeclare(outbox.EventType, true, false, false, false, nil); err != nil {
-				s.logger.Errorf("[StartPublisherWorker-4] startPublisher: %v", err)
+				s.logger.Errorf("[StartPublisherWorker] startPublisher: %v", err)
 				continue
 			}
 
@@ -140,7 +139,7 @@ func (s *startPublisherWorker) startPublisher(ctx context.Context, jobs <-chan e
 
 					return nil
 				}); err != nil {
-					s.logger.Errorf("[StartPublisherWorker-5] startPublisher: %v", err)
+					s.logger.Errorf("[StartPublisherWorker] startPublisher: %v", err)
 					continue
 				}
 
@@ -154,7 +153,7 @@ func (s *startPublisherWorker) startPublisher(ctx context.Context, jobs <-chan e
 
 				return nil
 			}); err != nil {
-				s.logger.Errorf("[StartPublisherWorker-6] startPublisher: %v", err)
+				s.logger.Errorf("[StartPublisherWorker] startPublisher: %v", err)
 				continue
 			}
 		}
@@ -173,7 +172,7 @@ func (s *startPublisherWorker) publishOne(ctx context.Context, ch *amqp.Channel,
 			Body:        []byte(outbox.Payload),
 			MessageId:   fmt.Sprintf("%d", outbox.ID),
 		}); err != nil {
-		s.logger.Errorf("[StartPublisherWorker-1] publishOne: %v", err)
+		s.logger.Errorf("[StartPublisherWorker] publishOne: %v", err)
 		return err
 	}
 
@@ -182,20 +181,20 @@ func (s *startPublisherWorker) publishOne(ctx context.Context, ch *amqp.Channel,
 
 	select {
 	case <-ctx.Done():
-		err := errors.New(utils.SERVICE_UNAVAILABLE)
-		s.logger.Errorf("[StartPublisherWorker-2] publishOne: %v", err)
+		err := utils.ErrServiceUnavailable
+		s.logger.Errorf("[StartPublisherWorker] publishOne: %v", err)
 
 		return err
 	case confirm := <-confirms:
 		if !confirm.Ack {
-			s.logger.Errorf("[StartPublisherWorker-3] publishOne: publish id %d failed", outbox.ID)
+			s.logger.Errorf("[StartPublisherWorker] publishOne: publish id %d failed", outbox.ID)
 
-			return errors.New(utils.SERVICE_UNAVAILABLE)
+			return utils.ErrServiceUnavailable
 		}
 	case <-timer.C:
-		s.logger.Errorf("[StartPublisherWorker-4] publishOne: publish id %d timeout", outbox.ID)
+		s.logger.Errorf("[StartPublisherWorker] publishOne: publish id %d timeout", outbox.ID)
 
-		return errors.New(utils.TIMEOUT_LIMIT_EXCEEDED)
+		return utils.ErrTimeoutLimitExceeded
 	}
 
 	return nil

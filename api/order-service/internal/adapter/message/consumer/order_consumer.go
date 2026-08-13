@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"order-service/config"
+	"order-service/internal/adapter/repository"
 	"order-service/internal/core/domain/entity"
+	"order-service/internal/core/service/transaction"
+	"time"
 
 	"github.com/elastic/go-elasticsearch/v7"
 	"github.com/labstack/gommon/log"
@@ -16,50 +19,55 @@ import (
 type OrderConsumerWorkerInterface interface {
 	StartCreateOrderWorker(ctx context.Context)
 	StartOrderPaymentSuccessWorker(ctx context.Context)
-	StartUpdateStatusOrderWorker(ctx context.Context)
+	StartElasticUpdateStatusOrderWorker(ctx context.Context)
+	StartDbUpdateStatusOrderWorker(ctx context.Context)
 }
 
 type orderConsumerWorker struct {
-	conn     *amqp.Connection
-	esClient *elasticsearch.Client
-	logger   *log.Logger
-	cfg      *config.Config
+	conn      *amqp.Connection
+	esClient  *elasticsearch.Client
+	repoOrder repository.OrderRepositoryInterface
+	txManager transaction.TransactionManager
+	logger    *log.Logger
+	cfg       *config.Config
 }
 
-func NewOrderConsumerWorker(conn *amqp.Connection, esClient *elasticsearch.Client, cfg *config.Config, logger *log.Logger) OrderConsumerWorkerInterface {
+func NewOrderConsumerWorker(conn *amqp.Connection, esClient *elasticsearch.Client, repoOrder repository.OrderRepositoryInterface, txManager transaction.TransactionManager, cfg *config.Config, logger *log.Logger) OrderConsumerWorkerInterface {
 	return &orderConsumerWorker{
-		conn:     conn,
-		esClient: esClient,
-		cfg:      cfg,
-		logger:   logger,
+		conn:      conn,
+		esClient:  esClient,
+		repoOrder: repoOrder,
+		txManager: txManager,
+		cfg:       cfg,
+		logger:    logger,
 	}
 }
 
-// StartUpdateStatusOrderWorker implements [OrderConsumerWorkerInterface].
-func (o *orderConsumerWorker) StartUpdateStatusOrderWorker(ctx context.Context) {
+// StartDbUpdateStatusOrderWorker implements [OrderConsumerWorkerInterface].
+func (o *orderConsumerWorker) StartDbUpdateStatusOrderWorker(ctx context.Context) {
 	ch, err := o.conn.Channel()
 	if err != nil {
-		o.logger.Errorf("[OrderConsumer-1] StartUpdateStatusOrderWorker: %v", err)
+		o.logger.Errorf("[OrderConsumer] StartDbUpdateStatusOrderWorker: %v", err)
 		return
 	}
 
 	defer ch.Close()
 
-	orderUpdateStatus := o.cfg.PublisherName.OrderUpdateStatus
+	orderUpdateStatus := o.cfg.PublisherName.DbOrderUpdateStatus
 
 	queue, err := ch.QueueDeclare(orderUpdateStatus, true, false, false, false, nil)
 	if err != nil {
-		o.logger.Errorf("[OrderConsumer-2] StartUpdateStatusOrderWorker: %v", err)
+		o.logger.Errorf("[OrderConsumer] StartDbUpdateStatusOrderWorker: %v", err)
 		return
 	}
 
 	msgs, err := ch.Consume(queue.Name, "", true, false, false, false, nil)
 	if err != nil {
-		o.logger.Errorf("[OrderConsumer-3] StartUpdateStatusOrderWorker: %v", err)
+		o.logger.Errorf("[OrderConsumer] StartDbUpdateStatusOrderWorker: %v", err)
 		return
 	}
 
-	o.logger.Infof("[OrderConsumer-4] StartUpdateStatusOrderWorker: waiting for messages. to exit press CTRL+C")
+	o.logger.Infof("[OrderConsumer] StartDbUpdateStatusOrderWorker: waiting for messages. to exit press CTRL+C")
 
 	for {
 		select {
@@ -67,8 +75,68 @@ func (o *orderConsumerWorker) StartUpdateStatusOrderWorker(ctx context.Context) 
 			return
 		case d, ok := <-msgs:
 			if !ok {
-				o.logger.Infof("[OrderConsumer-5] StartUpdateStatusOrderWorker: %v", "channel closed")
+				o.logger.Infof("[OrderConsumer] StartDbUpdateStatusOrderWorker: %v", "channel closed")
+				return
+			}
+
+			var orderStatus entity.OrderEntity
+
+			if err := json.Unmarshal(d.Body, &orderStatus); err != nil {
+				o.logger.Errorf("[OrderConsumer] StartDbUpdateStatusOrderWorker: %v", err)
 				continue
+			}
+
+			if err := o.txManager.WithinTransaction(ctx, func(txCtx context.Context) error {
+				if err := o.repoOrder.UpdateOrderStatus(txCtx, orderStatus); err != nil {
+					return err
+				}
+
+				return nil
+			}); err != nil {
+				o.logger.Errorf("[OrderConsumer] StartDbUpdateStatusOrderWorker: %v", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			o.logger.Infof("[OrderConsumer] StartUpdateStatusOrderWorker: order %d successfully updated to elasticsearch", orderStatus.ID)
+		}
+	}
+}
+
+// StartElasticUpdateStatusOrderWorker implements [OrderConsumerWorkerInterface].
+func (o *orderConsumerWorker) StartElasticUpdateStatusOrderWorker(ctx context.Context) {
+	ch, err := o.conn.Channel()
+	if err != nil {
+		o.logger.Errorf("[OrderConsumer] StartElasticUpdateStatusOrderWorker: %v", err)
+		return
+	}
+
+	defer ch.Close()
+
+	orderUpdateStatus := o.cfg.PublisherName.ElasticOrderUpdateStatus
+
+	queue, err := ch.QueueDeclare(orderUpdateStatus, true, false, false, false, nil)
+	if err != nil {
+		o.logger.Errorf("[OrderConsumer] StartElasticUpdateStatusOrderWorker: %v", err)
+		return
+	}
+
+	msgs, err := ch.Consume(queue.Name, "", true, false, false, false, nil)
+	if err != nil {
+		o.logger.Errorf("[OrderConsumer] StartElasticUpdateStatusOrderWorker: %v", err)
+		return
+	}
+
+	o.logger.Infof("[OrderConsumer] StartElasticUpdateStatusOrderWorker: waiting for messages. to exit press CTRL+C")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case d, ok := <-msgs:
+			if !ok {
+				o.logger.Infof("[OrderConsumer] StartElasticUpdateStatusOrderWorker: %v", "channel closed")
+				return
 			}
 
 			var orderStatus struct {
@@ -78,7 +146,7 @@ func (o *orderConsumerWorker) StartUpdateStatusOrderWorker(ctx context.Context) 
 			}
 
 			if err := json.Unmarshal(d.Body, &orderStatus); err != nil {
-				o.logger.Errorf("[OrderConsumer-6] StartUpdateStatusOrderWorker: %v", err)
+				o.logger.Errorf("[OrderConsumer] StartElasticUpdateStatusOrderWorker: %v", err)
 				continue
 			}
 
@@ -91,7 +159,7 @@ func (o *orderConsumerWorker) StartUpdateStatusOrderWorker(ctx context.Context) 
 
 			orderStatusJson, err := json.Marshal(reqBody)
 			if err != nil {
-				o.logger.Errorf("[OrderConsumer-7] StartUpdateStatusOrderWorker: %v", err)
+				o.logger.Errorf("[OrderConsumer] StartElasticUpdateStatusOrderWorker: %v", err)
 				continue
 			}
 
@@ -101,14 +169,12 @@ func (o *orderConsumerWorker) StartUpdateStatusOrderWorker(ctx context.Context) 
 				bytes.NewReader(orderStatusJson),
 				o.esClient.Update.WithContext(ctx),
 			); err != nil {
-				o.logger.Errorf("[OrderConsumer-8] StartUpdateStatusOrderWorker: %v", err)
+				o.logger.Errorf("[OrderConsumer] StartElasticUpdateStatusOrderWorker: %v", err)
+				time.Sleep(1 * time.Second)
 				continue
 			}
 
-			// body, _ := io.ReadAll(res.Body)
-			// defer res.Body.Close()
-
-			o.logger.Infof("[OrderConsumer-9] StartUpdateStatusOrderWorker: order %d successfully updated to elasticsearch", orderStatus.OrderID)
+			o.logger.Infof("[OrderConsumer] StartElasticUpdateStatusOrderWorker: order %d successfully updated to elasticsearch", orderStatus.OrderID)
 		}
 	}
 }
@@ -117,7 +183,7 @@ func (o *orderConsumerWorker) StartUpdateStatusOrderWorker(ctx context.Context) 
 func (o *orderConsumerWorker) StartOrderPaymentSuccessWorker(ctx context.Context) {
 	ch, err := o.conn.Channel()
 	if err != nil {
-		o.logger.Errorf("[OrderConsumer-1] StartOrderPaymentSuccessWorker: %v", err)
+		o.logger.Errorf("[OrderConsumer] StartOrderPaymentSuccessWorker: %v", err)
 		return
 	}
 
@@ -127,17 +193,17 @@ func (o *orderConsumerWorker) StartOrderPaymentSuccessWorker(ctx context.Context
 
 	queue, err := ch.QueueDeclare(orderPaymentSuccess, true, false, false, false, nil)
 	if err != nil {
-		o.logger.Errorf("[OrderConsumer-2] StartOrderPaymentSuccessWorker: %v", err)
+		o.logger.Errorf("[OrderConsumer] StartOrderPaymentSuccessWorker: %v", err)
 		return
 	}
 
 	msgs, err := ch.Consume(queue.Name, "", true, false, false, false, nil)
 	if err != nil {
-		o.logger.Errorf("[OrderConsumer-3] StartOrderPaymentSuccessWorker: %v", err)
+		o.logger.Errorf("[OrderConsumer] StartOrderPaymentSuccessWorker: %v", err)
 		return
 	}
 
-	o.logger.Infof("[OrderConsumer-4] StartOrderPaymentSuccessWorker: waiting for messages. to exit press CTRL+C")
+	o.logger.Infof("[OrderConsumer] StartOrderPaymentSuccessWorker: waiting for messages. to exit press CTRL+C")
 
 	for {
 		select {
@@ -145,8 +211,8 @@ func (o *orderConsumerWorker) StartOrderPaymentSuccessWorker(ctx context.Context
 			return
 		case d, ok := <-msgs:
 			if !ok {
-				o.logger.Infof("[OrderConsumer-5] StartOrderPaymentSuccessWorker: %v", "channel closed")
-				continue
+				o.logger.Infof("[OrderConsumer] StartOrderPaymentSuccessWorker: %v", "channel closed")
+				return
 			}
 
 			var payment struct {
@@ -155,7 +221,7 @@ func (o *orderConsumerWorker) StartOrderPaymentSuccessWorker(ctx context.Context
 			}
 
 			if err := json.Unmarshal(d.Body, &payment); err != nil {
-				o.logger.Errorf("[OrderConsumer-6] StartOrderPaymentSuccessWorker: %v", err)
+				o.logger.Errorf("[OrderConsumer] StartOrderPaymentSuccessWorker: %v", err)
 				continue
 			}
 
@@ -167,7 +233,7 @@ func (o *orderConsumerWorker) StartOrderPaymentSuccessWorker(ctx context.Context
 
 			paymentJson, err := json.Marshal(reqBody)
 			if err != nil {
-				o.logger.Errorf("[OrderConsumer-7] StartOrderPaymentSuccessWorker: %v", err)
+				o.logger.Errorf("[OrderConsumer] StartOrderPaymentSuccessWorker: %v", err)
 				continue
 			}
 
@@ -177,14 +243,15 @@ func (o *orderConsumerWorker) StartOrderPaymentSuccessWorker(ctx context.Context
 				bytes.NewReader(paymentJson),
 				o.esClient.Update.WithContext(ctx),
 			); err != nil {
-				o.logger.Errorf("[OrderConsumer-8] StartOrderPaymentSuccessWorker: %v", err)
+				o.logger.Errorf("[OrderConsumer] StartOrderPaymentSuccessWorker: %v", err)
+				time.Sleep(1 * time.Second)
 				continue
 			}
 
 			// body, _ := io.ReadAll(res.Body)
 			// defer res.Body.Close()
 
-			o.logger.Infof("[OrderConsumer-9] StartOrderPaymentSuccessWorker: order %d successfully updated to elasticsearch", payment.OrderID)
+			o.logger.Infof("[OrderConsumer] StartOrderPaymentSuccessWorker: order %d successfully updated to elasticsearch", payment.OrderID)
 		}
 	}
 }
@@ -193,7 +260,7 @@ func (o *orderConsumerWorker) StartOrderPaymentSuccessWorker(ctx context.Context
 func (o *orderConsumerWorker) StartCreateOrderWorker(ctx context.Context) {
 	ch, err := o.conn.Channel()
 	if err != nil {
-		o.logger.Errorf("[OrderConsumer-1] StartCreateOrderWorker: %v", err)
+		o.logger.Errorf("[OrderConsumer] StartCreateOrderWorker: %v", err)
 		return
 	}
 
@@ -203,17 +270,17 @@ func (o *orderConsumerWorker) StartCreateOrderWorker(ctx context.Context) {
 
 	queue, err := ch.QueueDeclare(orderCreate, true, false, false, false, nil)
 	if err != nil {
-		o.logger.Errorf("[OrderConsumer-2] StartCreateOrderWorker: %v", err)
+		o.logger.Errorf("[OrderConsumer] StartCreateOrderWorker: %v", err)
 		return
 	}
 
 	msgs, err := ch.Consume(queue.Name, "", true, false, false, false, nil)
 	if err != nil {
-		o.logger.Errorf("[OrderConsumer-3] StartCreateOrderWorker: %v", err)
+		o.logger.Errorf("[OrderConsumer] StartCreateOrderWorker: %v", err)
 		return
 	}
 
-	o.logger.Infof("[OrderConsumer-4] StartCreateOrderWorker: waiting for messages. to exit press CTRL+C")
+	o.logger.Infof("[OrderConsumer] StartCreateOrderWorker: waiting for messages. to exit press CTRL+C")
 
 	for {
 		select {
@@ -221,21 +288,21 @@ func (o *orderConsumerWorker) StartCreateOrderWorker(ctx context.Context) {
 			return
 		case d, ok := <-msgs:
 			if !ok {
-				o.logger.Infof("[OrderConsumer-5] StartCreateOrderWorker: %v", "channel closed")
-				continue
+				o.logger.Infof("[OrderConsumer] StartCreateOrderWorker: %v", "channel closed")
+				return
 			}
 
 			var order entity.OrderEntity
 
 			err := json.Unmarshal(d.Body, &order)
 			if err != nil {
-				o.logger.Errorf("[OrderConsumer-6] StartCreateOrderWorker: %v", err)
+				o.logger.Errorf("[OrderConsumer] StartCreateOrderWorker: %v", err)
 				continue
 			}
 
 			orderJson, err := json.Marshal(order)
 			if err != nil {
-				o.logger.Errorf("[OrderConsumer-7] StartCreateOrderWorker: %v", err)
+				o.logger.Errorf("[OrderConsumer] StartCreateOrderWorker: %v", err)
 				continue
 			}
 
@@ -246,14 +313,12 @@ func (o *orderConsumerWorker) StartCreateOrderWorker(ctx context.Context) {
 				o.esClient.Index.WithContext(ctx),
 				o.esClient.Index.WithRefresh("true"),
 			); err != nil {
-				o.logger.Errorf("[OrderConsumer-8] StartCreateOrderWorker: %v", err)
+				o.logger.Errorf("[OrderConsumer] StartCreateOrderWorker: %v", err)
+				time.Sleep(1 * time.Second)
 				continue
 			}
 
-			// body, _ := io.ReadAll(res.Body)
-			// defer res.Body.Close()
-
-			o.logger.Infof("[OrderConsumer-9] StartCreateOrderWorker: order %d successfully indexed to elasticsearch", order.ID)
+			o.logger.Infof("[OrderConsumer] StartCreateOrderWorker: order %d successfully indexed to elasticsearch", order.ID)
 		}
 	}
 }

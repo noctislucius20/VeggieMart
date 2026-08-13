@@ -32,6 +32,7 @@ func SetGatewayHeaders(c echo.Context, reqHeader *http.Header) {
 	reqHeader.Set("X-Request-ID", c.Response().Header().Get("X-Request-ID"))
 	reqHeader.Set("X-Forwarded-For", c.RealIP())
 	reqHeader.Set("X-Real-IP", c.RealIP())
+	reqHeader.Set("X-Idempotency-Key", c.Request().Header.Get("X-Idempotency-Key"))
 
 	gatewaySecret := os.Getenv("GATEWAY_SECRET_KEY")
 	if gatewaySecret != "" {

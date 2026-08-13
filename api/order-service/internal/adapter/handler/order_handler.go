@@ -70,7 +70,7 @@ func NewOrderHandler(e *echo.Echo, cfg *config.Config, orderService service.Orde
 	internalOrderGroup.Use(middlewareGateway.InternalServiceMiddleware(cfg))
 
 	// authGroup := e.Group("/auth", mid.CheckToken())
-	orderGroup.POST("", orderHandler.CreateOrder, mid.CheckToken(), mid.RequiredPermission(authPermission...), mid.DistanceCheck())
+	orderGroup.POST("", orderHandler.CreateOrder, mid.CheckToken(), mid.RequiredPermission(authPermission...), mid.DistanceCheck(), mid.IdempotencyCreateOrder())
 	orderGroup.GET("", orderHandler.GetAllOrders, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 	orderGroup.GET("/:id", orderHandler.GetOrderById, mid.CheckToken(), mid.RequiredPermission(authPermission...))
 	orderGroup.GET("/:orderCode/code", orderHandler.GetOrderByOrderCode, mid.CheckToken(), mid.RequiredPermission(authPermission...))
@@ -94,37 +94,39 @@ func (o *orderHandler) GetOrderById(c echo.Context) error {
 		jwtUserData = entity.JwtUserData{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[OrderHandler-1] GetOrderById: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[OrderHandler] GetOrderById: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
-		c.Logger().Errorf("[OrderHandler-2] GetOrderById: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[OrderHandler] GetOrderById: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[OrderHandler-3] GetOrderById: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
+		c.Logger().Errorf("[OrderHandler] GetOrderById: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-4] GetOrderById: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
+		c.Logger().Errorf("[OrderHandler] GetOrderById: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	result, err := o.orderService.GetOrderById(ctx, id, jwtUserData)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-5] GetOrderById: %v", err)
+		c.Logger().Errorf("[OrderHandler] GetOrderById: %v", err)
 		switch err.Error() {
-		case utils.DATA_NOT_FOUND:
+		case utils.ErrDataNotFound.Error():
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
+		case utils.ErrAccessForbidden.Error():
+			return c.JSON(http.StatusForbidden, response.ResponseFailed(err.Error()))
 		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 		}
 	}
 
@@ -166,31 +168,33 @@ func (o *orderHandler) GetOrderByOrderCode(c echo.Context) error {
 		jwtUserData = entity.JwtUserData{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[OrderHandler-1] GetOrderByOrderCode: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[OrderHandler] GetOrderByOrderCode: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
-		c.Logger().Errorf("[OrderHandler-2] GetOrderByOrderCode: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[OrderHandler] GetOrderByOrderCode: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	orderCode := c.Param("orderCode")
 	if orderCode == "" {
-		c.Logger().Errorf("[OrderHandler-3] GetOrderByOrderCode: %v", "order code required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ORDER_CODE_REQUIRED))
+		c.Logger().Errorf("[OrderHandler] GetOrderByOrderCode: %v", utils.ErrOrderCodeRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrOrderCodeRequired.Error()))
 	}
 
 	result, err := o.orderService.GetOrderByOrderCode(ctx, orderCode, jwtUserData)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-4] GetOrderByOrderCode: %v", err)
+		c.Logger().Errorf("[OrderHandler] GetOrderByOrderCode: %v", err)
 		switch err.Error() {
-		case utils.DATA_NOT_FOUND:
+		case utils.ErrDataNotFound.Error():
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
+		case utils.ErrAccessForbidden.Error():
+			return c.JSON(http.StatusForbidden, response.ResponseFailed(err.Error()))
 		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 		}
 	}
 
@@ -232,15 +236,15 @@ func (o *orderHandler) GetAllOrders(c echo.Context) error {
 		jwtUserData = entity.JwtUserData{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[OrderHandler-1] GetAllOrders: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[OrderHandler] GetAllOrders: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
-		c.Logger().Errorf("[OrderHandler-2] GetAllOrders: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[OrderHandler] GetAllOrders: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	userId := jwtUserData.UserID
@@ -249,13 +253,13 @@ func (o *orderHandler) GetAllOrders(c echo.Context) error {
 
 	page, err := conv.ParseInt64QueryParam(c, "page", 1)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-3] GetAllOrders: %v", err)
+		c.Logger().Errorf("[OrderHandler] GetAllOrders: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	limit, err := conv.ParseInt64QueryParam(c, "limit", 5)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-4] GetAllOrders: %v", err)
+		c.Logger().Errorf("[OrderHandler] GetAllOrders: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -271,8 +275,8 @@ func (o *orderHandler) GetAllOrders(c echo.Context) error {
 
 	results, countData, totalPages, err := o.orderService.GetAllOrders(ctx, reqEntity, user)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-5] GetAllOrders: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[OrderHandler] GetAllOrders: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	for _, result := range results {
@@ -316,31 +320,31 @@ func (o *orderHandler) UpdateOrderStatusByAdmin(c echo.Context) error {
 		req = request.OrderUpdateStatusRequest{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[OrderHandler-1] UpdateOrderStatusByAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[OrderHandler] UpdateOrderStatusByAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[OrderHandler-2] UpdateOrderStatusByAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
+		c.Logger().Errorf("[OrderHandler] UpdateOrderStatusByAdmin: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-3] UpdateOrderStatusByAdmin: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
+		c.Logger().Errorf("[OrderHandler] UpdateOrderStatusByAdmin: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	if err := c.Bind(&req); err != nil {
-		c.Logger().Errorf("[OrderHandler-4] UpdateOrderStatusByAdmin: %v", err)
+		c.Logger().Errorf("[OrderHandler] UpdateOrderStatusByAdmin: %v", err)
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[OrderHandler-5] UpdateOrderStatusByAdmin: %v", err)
+		c.Logger().Errorf("[OrderHandler] UpdateOrderStatusByAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -351,14 +355,14 @@ func (o *orderHandler) UpdateOrderStatusByAdmin(c echo.Context) error {
 	}
 
 	if err := o.orderService.UpdateOrderStatus(ctx, reqEntity, user); err != nil {
-		c.Logger().Errorf("[OrderHandler-6] UpdateOrderStatusByAdmin: %v", err)
+		c.Logger().Errorf("[OrderHandler] UpdateOrderStatusByAdmin: %v", err)
 		switch err.Error() {
-		case utils.DATA_NOT_FOUND:
+		case utils.ErrDataNotFound.Error():
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
-		case utils.INVALID_STATUS_TRANSITION:
+		case utils.ErrInvalidStatusTransition.Error():
 			return c.JSON(http.StatusConflict, response.ResponseFailed(err.Error()))
 		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 		}
 	}
 
@@ -373,24 +377,24 @@ func (o *orderHandler) CreateOrder(c echo.Context) error {
 		jwtUserData = entity.JwtUserData{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[OrderHandler-1] CreateOrder: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[OrderHandler] CreateOrder: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
-		c.Logger().Errorf("[OrderHandler-2] CreateOrder: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[OrderHandler] CreateOrder: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	if err := c.Bind(&req); err != nil {
-		c.Logger().Errorf("[OrderHandler-3] CreateOrder: %v", err)
+		c.Logger().Errorf("[OrderHandler] CreateOrder: %v", err)
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[OrderHandler-4] CreateOrder: %v", err)
+		c.Logger().Errorf("[OrderHandler] CreateOrder: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -414,14 +418,14 @@ func (o *orderHandler) CreateOrder(c echo.Context) error {
 
 	orderId, orderCode, err := o.orderService.CreateOrder(ctx, reqEntity, user)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-5] CreateOrder: %v", err)
+		c.Logger().Errorf("[OrderHandler] CreateOrder: %v", err)
 		switch err.Error() {
-		case utils.RELATION_DATA_NOT_FOUND:
+		case utils.ErrRelationDataNotFound.Error():
 			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
-		case utils.STOCK_UNAVAILABLE:
+		case utils.ErrStockUnavailable.Error():
 			return c.JSON(http.StatusConflict, response.ResponseFailed(err.Error()))
 		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 		}
 	}
 
@@ -441,37 +445,39 @@ func (o *orderHandler) GetOrderByIdAdmin(c echo.Context) error {
 		jwtUserData = entity.JwtUserData{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[OrderHandler-1] GetOrderByIdAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[OrderHandler] GetOrderByIdAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
-		c.Logger().Errorf("[OrderHandler-2] GetOrderByIdAdmin: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[OrderHandler] GetOrderByIdAdmin: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[OrderHandler-3] GetOrderByIdAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
+		c.Logger().Errorf("[OrderHandler] GetOrderByIdAdmin: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-4] GetOrderByIdAdmin: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
+		c.Logger().Errorf("[OrderHandler] GetOrderByIdAdmin: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	result, err := o.orderService.GetOrderById(ctx, id, jwtUserData)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-5] GetOrderByIdAdmin: %v", err)
+		c.Logger().Errorf("[OrderHandler] GetOrderByIdAdmin: %v", err)
 		switch err.Error() {
-		case utils.DATA_NOT_FOUND:
+		case utils.ErrDataNotFound.Error():
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
+		case utils.ErrAccessForbidden.Error():
+			return c.JSON(http.StatusForbidden, response.ResponseFailed(err.Error()))
 		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 		}
 	}
 
@@ -512,23 +518,23 @@ func (o *orderHandler) GetAllOrdersAdmin(c echo.Context) error {
 		respOrders = []response.OrderListResponse{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[OrderHandler-1] GetAllOrdersAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[OrderHandler] GetAllOrdersAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	search := c.QueryParam("search")
 
 	page, err := conv.ParseInt64QueryParam(c, "page", 1)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-2] GetAllOrdersAdmin: %v", err)
+		c.Logger().Errorf("[OrderHandler] GetAllOrdersAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	limit, err := conv.ParseInt64QueryParam(c, "limit", 5)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-3] GetAllOrdersAdmin: %v", err)
+		c.Logger().Errorf("[OrderHandler] GetAllOrdersAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -543,8 +549,8 @@ func (o *orderHandler) GetAllOrdersAdmin(c echo.Context) error {
 
 	results, countData, totalPages, err := o.orderService.GetAllOrdersAdmin(ctx, reqEntity, user)
 	if err != nil {
-		c.Logger().Errorf("[OrderHandler-4] GetAllOrdersAdmin: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[OrderHandler] GetAllOrdersAdmin: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	for _, result := range results {

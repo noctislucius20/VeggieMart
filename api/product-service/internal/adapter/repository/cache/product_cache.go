@@ -43,7 +43,7 @@ func (p *productCache) DeleteProductCache(ctx context.Context, id int64) error {
 	)
 
 	if err := p.redisClient.Del(ctx, delKeys...).Err(); err != nil {
-		p.logger.Errorf("[ProductCache-1] DeleteProductCache: %v", err)
+		p.logger.Errorf("[ProductCache] DeleteProductCache: %v", err)
 		return err
 	}
 
@@ -62,8 +62,8 @@ func (p *productCache) GetProductById(ctx context.Context, id int64) (*entity.Pr
 	if err == nil {
 		// if key exists but value null, return data not found error
 		if val == "null" {
-			err := errors.New(utils.DATA_NOT_FOUND)
-			p.logger.Errorf("[ProductCache-1] GetProductById: %v", err)
+			err := utils.ErrDataNotFound
+			p.logger.Errorf("[ProductCache] GetProductById: %v", err)
 			return nil, err
 		}
 
@@ -74,13 +74,13 @@ func (p *productCache) GetProductById(ctx context.Context, id int64) (*entity.Pr
 
 	productEntity, err := p.repoProduct.GetProductById(ctx, id)
 	if err != nil {
-		if err.Error() == utils.DATA_NOT_FOUND {
+		if errors.Is(err, utils.ErrDataNotFound) {
 			if err := p.redisClient.Set(ctx, key, "null", 10*time.Minute); err != nil {
-				p.logger.Errorf("[ProductCache-2] GetProductById: %v", err)
+				p.logger.Errorf("[ProductCache] GetProductById: %v", err)
 			}
 		}
 
-		p.logger.Errorf("[ProductCache-3] GetProductById: %v", err)
+		p.logger.Errorf("[ProductCache] GetProductById: %v", err)
 		return nil, err
 	}
 
@@ -90,7 +90,7 @@ func (p *productCache) GetProductById(ctx context.Context, id int64) (*entity.Pr
 	jsonData, _ := json.Marshal(product)
 	ttl := 10*time.Minute + time.Duration(rand.Intn(120))*time.Second
 	if err := p.redisClient.Set(ctx, key, jsonData, ttl).Err(); err != nil {
-		p.logger.Errorf("[ProductCache-4] GetProductById: %v", err)
+		p.logger.Errorf("[ProductCache] GetProductById: %v", err)
 	}
 
 	return &product, nil

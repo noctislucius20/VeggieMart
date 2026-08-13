@@ -43,9 +43,9 @@ func (o *orderCache) GetRoleById(ctx context.Context, id int64) (*entity.RoleEnt
 	keyRolePermission := fmt.Sprintf("role:id:%d", id)
 	rolePermission, err := o.redisClient.Get(ctx, keyRolePermission).Result()
 	if err != nil {
-		o.logger.Errorf("[OrderCache-1] GetRoleById: %v", err)
+		o.logger.Errorf("[OrderCache] GetRoleById: %v", err)
 		if errors.Is(err, redis.Nil) {
-			return nil, errors.New(utils.RELATION_DATA_NOT_FOUND)
+			return nil, utils.ErrRelationDataNotFound
 		}
 		return nil, err
 	}
@@ -67,25 +67,31 @@ func (o *orderCache) GetOrderByOrderCode(ctx context.Context, orderCode string, 
 	if err == nil {
 		// if key exists but value null, return data not found error
 		if val == "null" {
-			err := errors.New(utils.DATA_NOT_FOUND)
-			o.logger.Errorf("[OrderCache-1] GetOrderByOrderCode: %v", err)
+			err := utils.ErrDataNotFound
+			o.logger.Errorf("[OrderCache] GetOrderByOrderCode: %v", err)
 			return nil, err
 		}
 
 		json.Unmarshal([]byte(val), &order)
+
+		if userId != 0 && order.BuyerID != userId {
+			err := utils.ErrAccessForbidden
+			o.logger.Errorf("[OrderCache] GetOrderByOrderCode: %v", err)
+			return nil, err
+		}
 
 		return &order, nil
 	}
 
 	orderEntity, err := o.repoOrder.GetOrderByOrderCode(ctx, orderCode, userId)
 	if err != nil {
-		if err.Error() == utils.DATA_NOT_FOUND {
+		if errors.Is(err, utils.ErrDataNotFound) {
 			if err := o.redisClient.Set(ctx, key, "null", 10*time.Minute); err != nil {
-				o.logger.Errorf("[OrderCache-2] GetOrderByOrderCode: %v", err)
+				o.logger.Errorf("[OrderCache] GetOrderByOrderCode: %v", err)
 			}
 		}
 
-		o.logger.Errorf("[OrderCache-3] GetOrderByOrderCode: %v", err)
+		o.logger.Errorf("[OrderCache] GetOrderByOrderCode: %v", err)
 		return nil, err
 	}
 
@@ -95,7 +101,7 @@ func (o *orderCache) GetOrderByOrderCode(ctx context.Context, orderCode string, 
 	jsonData, _ := json.Marshal(order)
 	ttl := 10*time.Minute + time.Duration(rand.Intn(120))*time.Second
 	if err := o.redisClient.Set(ctx, key, jsonData, ttl).Err(); err != nil {
-		o.logger.Errorf("[OrderCache-4] GetOrderByOrderCode: %v", err)
+		o.logger.Errorf("[OrderCache] GetOrderByOrderCode: %v", err)
 	}
 
 	return &order, nil
@@ -111,7 +117,7 @@ func (o *orderCache) DeleteOrderCache(ctx context.Context, id int64, orderCode s
 	)
 
 	if err := o.redisClient.Del(ctx, delKeys...).Err(); err != nil {
-		o.logger.Errorf("[OrderCache-1] DeleteOrderCache: %v", err)
+		o.logger.Errorf("[OrderCache] DeleteOrderCache: %v", err)
 		return err
 	}
 
@@ -130,25 +136,31 @@ func (o *orderCache) GetOrderById(ctx context.Context, orderId int64, userId int
 	if err == nil {
 		// if key exists but value null, return data not found error
 		if val == "null" {
-			err := errors.New(utils.DATA_NOT_FOUND)
-			o.logger.Errorf("[OrderCache-1] GetOrderById: %v", err)
+			err := utils.ErrDataNotFound
+			o.logger.Errorf("[OrderCache] GetOrderById: %v", err)
 			return nil, err
 		}
 
 		json.Unmarshal([]byte(val), &order)
+
+		if userId != 0 && order.BuyerID != userId {
+			err := utils.ErrAccessForbidden
+			o.logger.Errorf("[OrderCache] GetOrderById: %v", err)
+			return nil, err
+		}
 
 		return &order, nil
 	}
 
 	orderEntity, err := o.repoOrder.GetOrderById(ctx, orderId, userId)
 	if err != nil {
-		if err.Error() == utils.DATA_NOT_FOUND {
+		if errors.Is(err, utils.ErrDataNotFound) {
 			if err := o.redisClient.Set(ctx, key, "null", 10*time.Minute); err != nil {
-				o.logger.Errorf("[OrderCache-2] GetOrderById: %v", err)
+				o.logger.Errorf("[OrderCache] GetOrderById: %v", err)
 			}
 		}
 
-		o.logger.Errorf("[OrderCache-3] GetOrderById: %v", err)
+		o.logger.Errorf("[OrderCache] GetOrderById: %v", err)
 		return nil, err
 	}
 
@@ -158,7 +170,7 @@ func (o *orderCache) GetOrderById(ctx context.Context, orderId int64, userId int
 	jsonData, _ := json.Marshal(order)
 	ttl := 10*time.Minute + time.Duration(rand.Intn(120))*time.Second
 	if err := o.redisClient.Set(ctx, key, jsonData, ttl).Err(); err != nil {
-		o.logger.Errorf("[OrderCache-4] GetOrderById: %v", err)
+		o.logger.Errorf("[OrderCache] GetOrderById: %v", err)
 	}
 
 	return &order, nil

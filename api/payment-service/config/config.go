@@ -44,9 +44,12 @@ type Midtrans struct {
 }
 
 type PublisherName struct {
-	PaymentSuccess     string `json:"payment_success"`
-	PaymentUpdate      string `json:"payment_update"`
-	OrderPaymentCreate string `json:"order_payment_create"`
+	PaymentSuccess           string `json:"payment_success"`
+	PaymentUpdate            string `json:"payment_update"`
+	OrderPaymentCreate       string `json:"order_payment_create"`
+	ElasticOrderUpdateStatus string `json:"elastic_order_update_status"`
+	DbOrderUpdateStatus      string `json:"db_order_update_status"`
+	EmailUpdateOrderStatus   string `json:"email_update_order_status"`
 }
 
 type APIGateway struct {
@@ -111,9 +114,12 @@ func NewConfig() *Config {
 			Environment: viper.GetInt("MIDTRANS_ENVIRONMENT"),
 		},
 		PublisherName: PublisherName{
-			PaymentSuccess:     viper.GetString("PAYMENT_SUCCESS"),
-			PaymentUpdate:      viper.GetString("PAYMENT_UPDATE"),
-			OrderPaymentCreate: viper.GetString("ORDER_PAYMENT_CREATE"),
+			PaymentSuccess:           viper.GetString("PAYMENT_SUCCESS"),
+			PaymentUpdate:            viper.GetString("PAYMENT_UPDATE"),
+			OrderPaymentCreate:       viper.GetString("ORDER_PAYMENT_CREATE"),
+			EmailUpdateOrderStatus:   viper.GetString("EMAIL_UPDATE_ORDER_STATUS"),
+			ElasticOrderUpdateStatus: viper.GetString("ELASTIC_ORDER_UPDATE_STATUS"),
+			DbOrderUpdateStatus:      viper.GetString("DB_ORDER_UPDATE_STATUS"),
 		},
 		APIGateway: APIGateway{
 			RequestAPI: viper.GetString("GATEWAY_REQUEST_API"),

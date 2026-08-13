@@ -62,16 +62,18 @@ func (o *orderRepository) GetOrderByOrderCode(ctx context.Context, orderCode str
 			return db.Omit("created_at", "last_used", "regular_price")
 		})
 
-	if userId != 0 {
-		sqlMain = sqlMain.Where("buyer_id = ?", userId)
-	}
-
 	if err := sqlMain.
 		First(&modelOrder).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err = errors.New(utils.DATA_NOT_FOUND)
+			err = utils.ErrDataNotFound
 		}
-		o.logger.Errorf("[OrderRepository-1] GetOrderByOrderCode: %v", err)
+		o.logger.Errorf("[OrderRepository] GetOrderByOrderCode: %v", err)
+		return nil, err
+	}
+
+	if userId != 0 && modelOrder.BuyerID != userId {
+		err := utils.ErrAccessForbidden
+		o.logger.Errorf("[OrderRepository] GetOrderByOrderCode: %v", err)
 		return nil, err
 	}
 
@@ -127,7 +129,7 @@ func (o *orderRepository) GetOrderByOrderCode(ctx context.Context, orderCode str
 func (o *orderRepository) CreateOrder(ctx context.Context, req entity.OrderEntity) (int64, error) {
 	orderDate, orderTime, err := conv.ParseStringToDateTime(req.OrderDate, req.OrderTime)
 	if err != nil {
-		o.logger.Errorf("[OrderRepository-1] CreateOrder: %v", err)
+		o.logger.Errorf("[OrderRepository] CreateOrder: %v", err)
 		return 0, err
 	}
 
@@ -172,9 +174,9 @@ func (o *orderRepository) CreateOrder(ctx context.Context, req entity.OrderEntit
 	}
 
 	if err := db.WithContext(ctx).Create(&modelOrder).Error; err != nil {
-		o.logger.Errorf("[OrderRepository-2] CreateOrder: %v", err)
+		o.logger.Errorf("[OrderRepository] CreateOrder: %v", err)
 		if strings.Contains(err.Error(), "foreign key") {
-			err = errors.New(utils.RELATION_DATA_NOT_FOUND)
+			err = utils.ErrRelationDataNotFound
 		}
 		return 0, err
 	}
@@ -219,7 +221,7 @@ func (o *orderRepository) GetAllOrders(ctx context.Context, query entity.OrderQu
 	}
 
 	if err := sqlMain.Model(&modelOrders).Count(&countData).Error; err != nil {
-		o.logger.Errorf("[OrderRepository-1] GetAllOrders: %v", err)
+		o.logger.Errorf("[OrderRepository] GetAllOrders: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -228,7 +230,7 @@ func (o *orderRepository) GetAllOrders(ctx context.Context, query entity.OrderQu
 		Limit(int(query.Limit)).
 		Offset(int(offset)).
 		Find(&modelOrders).Error; err != nil {
-		o.logger.Errorf("[OrderRepository-2] GetAllOrders: %v", err)
+		o.logger.Errorf("[OrderRepository] GetAllOrders: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -302,15 +304,17 @@ func (o *orderRepository) GetOrderById(ctx context.Context, orderId int64, userI
 			return db.Omit("created_at", "last_used", "regular_price")
 		})
 
-	if userId != 0 {
-		sqlMain = sqlMain.Where("buyer_id = ?", userId)
+	if err := sqlMain.First(&modelOrder).Error; err != nil {
+		o.logger.Errorf("[OrderRepository] GetOrderById: %v", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			err = utils.ErrDataNotFound
+		}
+		return nil, err
 	}
 
-	if err := sqlMain.First(&modelOrder).Error; err != nil {
-		o.logger.Errorf("[OrderRepository-1] GetOrderById: %v", err)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err = errors.New(utils.DATA_NOT_FOUND)
-		}
+	if userId != 0 && modelOrder.BuyerID != userId {
+		err := utils.ErrAccessForbidden
+		o.logger.Errorf("[OrderRepository] GetOrderById: %v", err)
 		return nil, err
 	}
 
@@ -374,7 +378,7 @@ func (o *orderRepository) UpdateOrderStatus(ctx context.Context, req entity.Orde
 	)
 
 	if err := db.WithContext(ctx).Updates(&modelOrder).Error; err != nil {
-		o.logger.Errorf("[OrderRepository-1] UpdateOrderStatus: %v", err)
+		o.logger.Errorf("[OrderRepository] UpdateOrderStatus: %v", err)
 		return err
 	}
 

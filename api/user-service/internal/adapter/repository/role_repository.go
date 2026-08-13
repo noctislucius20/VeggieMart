@@ -52,9 +52,9 @@ func (r *roleRepository) CreateRole(ctx context.Context, req entity.RoleEntity) 
 	)
 
 	if err := db.WithContext(ctx).Create(&modelRole).Error; err != nil {
-		r.logger.Errorf("[RoleRepository-1] CreateRole: %v", err)
+		r.logger.Errorf("[RoleRepository] CreateRole: %v", err)
 		if strings.Contains(err.Error(), "duplicate key") {
-			err := errors.New(utils.DATA_ALREADY_EXISTS)
+			err := utils.ErrDataAlreadyExists
 			return 0, err
 		}
 		return 0, err
@@ -81,22 +81,22 @@ func (r *roleRepository) DeleteRole(ctx context.Context, id int64) error {
 		Joins("LEFT JOIN user_role ON roles.id = user_role.role_id").
 		Where("roles.id = ?", id).
 		First(&roleDeleteDTO).Error; err != nil {
-		r.logger.Errorf("[RoleRepository-1] DeleteRole: %v", err)
+		r.logger.Errorf("[RoleRepository] DeleteRole: %v", err)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err := errors.New(utils.DATA_NOT_FOUND)
+			err := utils.ErrDataNotFound
 			return err
 		}
 		return err
 	}
 
 	if roleDeleteDTO.UserRoleRoleID > 0 {
-		err := errors.New(utils.DATA_STILL_IN_USED)
-		r.logger.Errorf("[RoleRepository-2] DeleteRole: %v", err)
+		err := utils.ErrDataStillInUsed
+		r.logger.Errorf("[RoleRepository] DeleteRole: %v", err)
 		return err
 	}
 
 	if err := db.WithContext(ctx).Delete(&modelRole).Error; err != nil {
-		r.logger.Errorf("[RoleRepository-3] DeleteRole: %v", err)
+		r.logger.Errorf("[RoleRepository] DeleteRole: %v", err)
 		return err
 	}
 
@@ -111,7 +111,7 @@ func (r *roleRepository) GetRolesAll(ctx context.Context, search string) ([]enti
 	)
 
 	if err := db.WithContext(ctx).Select("id", "name").Where("name ILIKE ?", "%"+search+"%").Find(&modelRoles).Error; err != nil {
-		r.logger.Errorf("[RoleRepository-1] GetRolesAll: %v", err)
+		r.logger.Errorf("[RoleRepository] GetRolesAll: %v", err)
 		return nil, err
 	}
 
@@ -133,13 +133,15 @@ func (r *roleRepository) GetRoleByIdOrName(ctx context.Context, id int64, name s
 		modelRole model.Role
 	)
 
-	if err := db.WithContext(ctx).Select("id", "name").Preload("Permissions", func(db *gorm.DB) *gorm.DB {
-		return db.Select("id", "resource", "action", "scope")
-	}).
+	if err := db.WithContext(ctx).
+		Select("id", "name").
+		Preload("Permissions", func(db *gorm.DB) *gorm.DB {
+			return db.Select("id", "resource", "action", "scope")
+		}).
 		First(&modelRole, "id = ? OR name = ?", id, name).Error; err != nil {
-		r.logger.Errorf("[RoleRepository-1] GetRoleByIdOrName: %v", err)
+		r.logger.Errorf("[RoleRepository] GetRoleByIdOrName: %v", err)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err := errors.New(utils.DATA_NOT_FOUND)
+			err := utils.ErrDataNotFound
 			return nil, err
 		}
 		return nil, err
@@ -174,17 +176,17 @@ func (r *roleRepository) UpdateRole(ctx context.Context, req entity.RoleEntity) 
 
 	tx := db.WithContext(ctx).Updates(&modelRole)
 	if tx.Error != nil {
-		r.logger.Errorf("[RoleRepository-1] UpdateRole: %v", tx.Error)
+		r.logger.Errorf("[RoleRepository] UpdateRole: %v", tx.Error)
 		if strings.Contains(tx.Error.Error(), "duplicate key") {
-			err := errors.New(utils.DATA_ALREADY_EXISTS)
+			err := utils.ErrDataAlreadyExists
 			return err
 		}
 		return tx.Error
 	}
 
 	if tx.RowsAffected == 0 {
-		err := errors.New(utils.DATA_NOT_FOUND)
-		r.logger.Errorf("[RoleRepository-2] UpdateRole: %v", err)
+		err := utils.ErrDataNotFound
+		r.logger.Errorf("[RoleRepository] UpdateRole: %v", err)
 		return err
 	}
 

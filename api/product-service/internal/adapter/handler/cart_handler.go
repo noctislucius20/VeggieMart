@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"product-service/config"
 	"product-service/internal/adapter"
@@ -53,10 +52,11 @@ func NewCartHandler(e *echo.Echo, cartService service.CartServiceInterface, cfg 
 	productGroup := e.Group("/products")
 	productGroup.Use(middlewareGateway.GatewayValidationMiddleware(cfg))
 
-	productGroup.POST("/carts", cartHandler.AddToCart, mid.CheckToken(), mid.RequiredPermission(authPermission...))
-	productGroup.GET("/carts", cartHandler.GetCart, mid.CheckToken(), mid.RequiredPermission(authPermission...))
-	productGroup.DELETE("/carts", cartHandler.RemoveFromCart, mid.CheckToken(), mid.RequiredPermission(authPermission...))
-	productGroup.DELETE("/carts/all", cartHandler.RemoveAllFromCart, mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	authCartGroup := productGroup.Group("/carts", mid.CheckToken(), mid.RequiredPermission(authPermission...))
+	authCartGroup.POST("", cartHandler.AddToCart)
+	authCartGroup.GET("", cartHandler.GetCart)
+	authCartGroup.DELETE("", cartHandler.RemoveFromCart)
+	authCartGroup.DELETE("/all", cartHandler.RemoveAllFromCart)
 
 	return cartHandler
 }
@@ -69,30 +69,30 @@ func (ch *cartHandler) AddToCart(c echo.Context) error {
 		jwtUserData entity.JwtUserData
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[CartHandler-1] AddToCart: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[CartHandler] AddToCart: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
-		c.Logger().Errorf("[CartHandler-2] AddToCart: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[CartHandler] AddToCart: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	if err := c.Bind(&req); err != nil {
-		c.Logger().Errorf("[CartHandler-3] AddToCart: %v", err)
+		c.Logger().Errorf("[CartHandler] AddToCart: %v", err)
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[CartHandler-4] AddToCart: %v", err)
+		c.Logger().Errorf("[CartHandler] AddToCart: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	if req.Quantity <= 0 {
-		err := errors.New(utils.QUANTITY_INVALID)
-		c.Logger().Errorf("[CartHandler-5] AddToCart: %v", err)
+		err := utils.ErrQuantityInvalid
+		c.Logger().Errorf("[CartHandler] AddToCart: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -102,8 +102,8 @@ func (ch *cartHandler) AddToCart(c echo.Context) error {
 	}
 
 	if err := ch.cartService.AddToCart(ctx, jwtUserData.UserID, reqEntity); err != nil {
-		c.Logger().Errorf("[CartHandler-6] AddToCart: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[CartHandler] AddToCart: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	return c.JSON(http.StatusCreated, response.ResponseSuccess(nil))
@@ -117,21 +117,21 @@ func (ch *cartHandler) GetCart(c echo.Context) error {
 		jwtUserData  entity.JwtUserData
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[CartHandler-1] GetCart: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[CartHandler] GetCart: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
-		c.Logger().Errorf("[CartHandler-2] GetCart: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[CartHandler] GetCart: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	results, err := ch.cartService.GetCart(ctx, jwtUserData.UserID)
 	if err != nil {
-		c.Logger().Errorf("[CartHandler-3] GetCart: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[CartHandler] GetCart: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	for _, result := range results {
@@ -157,35 +157,35 @@ func (ch *cartHandler) RemoveFromCart(c echo.Context) error {
 		jwtUserData entity.JwtUserData
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[CartHandler-1] RemoveFromCart: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[CartHandler] RemoveFromCart: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
-		c.Logger().Errorf("[CartHandler-2] RemoveFromCart: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[CartHandler] RemoveFromCart: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	productIdParam := c.QueryParam("product_id")
 	if productIdParam == "" {
-		c.Logger().Errorf("[CartHandler-3] RemoveFromCart: %v", "product_id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.PRODUCT_ID_REQUIRED))
+		c.Logger().Errorf("[CartHandler] RemoveFromCart: %v", utils.ErrProductIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrProductIDRequired.Error()))
 	}
 
 	productId, err := strconv.ParseInt(productIdParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[CartHandler-4] RemoveFromCart: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.PRODUCT_ID_INVALID))
+		c.Logger().Errorf("[CartHandler] RemoveFromCart: %v", utils.ErrProductIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrProductIDInvalid.Error()))
 	}
 
 	if err := ch.cartService.RemoveFromCart(ctx, jwtUserData.UserID, productId); err != nil {
-		c.Logger().Errorf("[CartHandler-5] RemoveFromCart: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[CartHandler] RemoveFromCart: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
-	return c.JSON(http.StatusOK, response.ResponseSuccess(nil))
+	return c.JSON(http.StatusNoContent, response.ResponseSuccess(nil))
 }
 
 // RemoveAllFromCart implements [CartHandlerInterface].
@@ -195,21 +195,21 @@ func (ch *cartHandler) RemoveAllFromCart(c echo.Context) error {
 		jwtUserData entity.JwtUserData
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[CartHandler-1] RemoveAllFromCart: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[CartHandler] RemoveAllFromCart: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := json.Unmarshal([]byte(user), &jwtUserData); err != nil {
-		c.Logger().Errorf("[CartHandler-2] RemoveAllFromCart: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[CartHandler] RemoveAllFromCart: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	if err := ch.cartService.RemoveAllFromCart(ctx, jwtUserData.UserID); err != nil {
-		c.Logger().Errorf("[CartHandler-3] RemoveAllFromCart: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[CartHandler] RemoveAllFromCart: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
-	return c.JSON(http.StatusOK, response.ResponseSuccess(nil))
+	return c.JSON(http.StatusNoContent, response.ResponseSuccess(nil))
 }

@@ -36,16 +36,22 @@ func (m *middlewareJwt) CheckToken() echo.MiddlewareFunc {
 				return next(c)
 			}
 
+			var tokenString string
+
 			authHeader := c.Request().Header.Get("Authorization")
-			if authHeader == "" {
-				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+			if authHeader != "" {
+				tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+			} else if c.IsWebSocket() {
+				tokenString = c.QueryParam("token")
 			}
 
-			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+			if tokenString == "" {
+				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
+			}
 
 			_, err := m.validateToken(tokenString)
 			if err != nil {
-				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_EXPIRED))
+				return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenExpired.Error()))
 			}
 
 			return next(c)

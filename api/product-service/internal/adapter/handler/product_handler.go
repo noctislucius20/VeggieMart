@@ -95,19 +95,19 @@ func (p *productHandler) UpdateStockProduct(c echo.Context) error {
 		req = []request.ProductUpdateStockRequest{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[ProductHandler-1] UpdateStockProduct: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[ProductHandler] UpdateStockProduct: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := c.Bind(&req); err != nil {
-		c.Logger().Errorf("[ProductHandler-2] UpdateStockProduct: %v", err)
+		c.Logger().Errorf("[ProductHandler] UpdateStockProduct: %v", err)
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[ProductHandler-3] UpdateStockProduct: %v", err)
+		c.Logger().Errorf("[ProductHandler] UpdateStockProduct: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -120,12 +120,12 @@ func (p *productHandler) UpdateStockProduct(c echo.Context) error {
 	}
 
 	if err := p.service.UpdateStockProduct(ctx, reqEntity); err != nil {
-		c.Logger().Errorf("[ProductHandler-4] UpdateStockProduct: %v", err)
+		c.Logger().Errorf("[ProductHandler] UpdateStockProduct: %v", err)
 		switch err.Error() {
-		case utils.STOCK_UNAVAILABLE:
+		case utils.ErrStockUnavailable.Error():
 			return c.JSON(http.StatusConflict, response.ResponseFailed(err.Error()))
 		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 		}
 	}
 
@@ -141,26 +141,26 @@ func (p *productHandler) GetDetailProductHome(c echo.Context) error {
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[ProductHandler-1] GetDetailProductHome: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
+		c.Logger().Errorf("[ProductHandler] GetDetailProductHome: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-2] GetDetailProductHome: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
+		c.Logger().Errorf("[ProductHandler] GetDetailProductHome: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	result, err := p.service.GetProductById(ctx, id)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-3] GetDetailProductHome: %v", err)
+		c.Logger().Errorf("[ProductHandler] GetDetailProductHome: %v", err)
 		switch err.Error() {
-		case utils.DATA_NOT_FOUND:
+		case utils.ErrDataNotFound.Error():
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
-		case utils.RELATION_DATA_NOT_FOUND:
+		case utils.ErrRelationDataNotFound.Error():
 			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 		}
 	}
 
@@ -221,31 +221,31 @@ func (p *productHandler) GetAllProductsShop(c echo.Context) error {
 
 	page, err := conv.ParseInt64QueryParam(c, "page", 1)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-1] GetAllProductsShop: %v", err)
+		c.Logger().Errorf("[ProductHandler] GetAllProductsShop: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	limit, err := conv.ParseInt64QueryParam(c, "limit", 10)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-2] GetAllProductsShop: %v", err)
+		c.Logger().Errorf("[ProductHandler] GetAllProductsShop: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	categoryId, err := conv.ParseInt64QueryParam(c, "category", 0)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-3] GetAllProductsShop: %v", err)
+		c.Logger().Errorf("[ProductHandler] GetAllProductsShop: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	startPrice, endPrice, err := conv.RangePriceFormat(price)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-4] GetAllProductsShop: %v", err)
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.PRICE_RANGE_INVALID))
+		c.Logger().Errorf("[ProductHandler] GetAllProductsShop: %v", err)
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrPriceRangeInvalid.Error()))
 	}
 
 	if startPrice > 0 && endPrice > 0 && startPrice > endPrice {
-		c.Logger().Errorf("[ProductHandler-5] GetAllProductsShop: %v", err)
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.PRICE_RANGE_INVALID))
+		c.Logger().Errorf("[ProductHandler] GetAllProductsShop: %v", err)
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrPriceRangeInvalid.Error()))
 	}
 
 	reqEntity := entity.QueryStringProduct{
@@ -262,12 +262,12 @@ func (p *productHandler) GetAllProductsShop(c echo.Context) error {
 
 	results, countData, totalPage, err := p.service.GetAllProducts(ctx, reqEntity)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-5] GetAllProductsShop: %v", err)
+		c.Logger().Errorf("[ProductHandler] GetAllProductsShop: %v", err)
 		switch err.Error() {
-		case utils.RELATION_DATA_NOT_FOUND:
+		case utils.ErrRelationDataNotFound.Error():
 			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 		}
 	}
 
@@ -315,12 +315,12 @@ func (p *productHandler) GetAllProductsHome(c echo.Context) error {
 
 	results, _, _, err := p.service.GetAllProducts(ctx, reqEntity)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-1] GetAllProductsHome: %v", err)
+		c.Logger().Errorf("[ProductHandler] GetAllProductsHome: %v", err)
 		switch err.Error() {
-		case utils.RELATION_DATA_NOT_FOUND:
+		case utils.ErrRelationDataNotFound.Error():
 			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 		}
 	}
 
@@ -344,35 +344,35 @@ func (p *productHandler) DeleteProductAdmin(c echo.Context) error {
 		ctx = c.Request().Context()
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[ProductHandler-1] DeleteProductAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[ProductHandler] DeleteProductAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[ProductHandler-2] DeleteProductAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
+		c.Logger().Errorf("[ProductHandler] DeleteProductAdmin: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-3] DeleteProductAdmin: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
+		c.Logger().Errorf("[ProductHandler] DeleteProductAdmin: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	if err := p.service.DeleteProduct(ctx, id); err != nil {
-		c.Logger().Errorf("[ProductHandler-4] DeleteProductAdmin: %v", err)
+		c.Logger().Errorf("[ProductHandler] DeleteProductAdmin: %v", err)
 		switch err.Error() {
-		case utils.DATA_NOT_FOUND:
+		case utils.ErrDataNotFound.Error():
 			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 		}
 	}
 
-	return c.JSON(http.StatusOK, response.ResponseSuccess(nil))
+	return c.JSON(http.StatusNoContent, response.ResponseSuccess(nil))
 }
 
 // UpdateProductAdmin implements ProductHandlerInterface.
@@ -382,31 +382,31 @@ func (p *productHandler) UpdateProductAdmin(c echo.Context) error {
 		req = request.ProductRequest{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[ProductHandler-1] UpdateProductAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[ProductHandler] UpdateProductAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[ProductHandler-2] UpdateProductAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
+		c.Logger().Errorf("[ProductHandler] UpdateProductAdmin: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-3] UpdateProductAdmin: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
+		c.Logger().Errorf("[ProductHandler] UpdateProductAdmin: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	if err := c.Bind(&req); err != nil {
-		c.Logger().Errorf("[ProductHandler-4] UpdateProductAdmin: %v", err)
+		c.Logger().Errorf("[ProductHandler] UpdateProductAdmin: %v", err)
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[ProductHandler-5] UpdateProductAdmin: %v", err)
+		c.Logger().Errorf("[ProductHandler] UpdateProductAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -442,14 +442,14 @@ func (p *productHandler) UpdateProductAdmin(c echo.Context) error {
 	}
 
 	if err := p.service.UpdateProduct(ctx, reqEntity); err != nil {
-		c.Logger().Errorf("[ProductHandler-6] UpdateProductAdmin: %v", err)
+		c.Logger().Errorf("[ProductHandler] UpdateProductAdmin: %v", err)
 		switch err.Error() {
-		case utils.DATA_NOT_FOUND:
+		case utils.ErrDataNotFound.Error():
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
-		case utils.RELATION_DATA_NOT_FOUND:
+		case utils.ErrRelationDataNotFound.Error():
 			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 		}
 	}
 
@@ -463,19 +463,19 @@ func (p *productHandler) CreateProductAdmin(c echo.Context) error {
 		req = request.ProductRequest{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[ProductHandler-1] CreateProductAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[ProductHandler] CreateProductAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := c.Bind(&req); err != nil {
-		c.Logger().Errorf("[ProductHandler-2] CreateProductAdmin: %v", err)
+		c.Logger().Errorf("[ProductHandler] CreateProductAdmin: %v", err)
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[ProductHandler-3] CreateProductAdmin: %v", err)
+		c.Logger().Errorf("[ProductHandler] CreateProductAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -512,10 +512,10 @@ func (p *productHandler) CreateProductAdmin(c echo.Context) error {
 	productId, err := p.service.CreateProduct(ctx, reqEntity)
 	if err != nil {
 		switch err.Error() {
-		case utils.RELATION_DATA_NOT_FOUND:
+		case utils.ErrRelationDataNotFound.Error():
 			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 		}
 	}
 
@@ -533,34 +533,34 @@ func (p *productHandler) GetProductByIdAdmin(c echo.Context) error {
 		respProduct = response.ProductDetailResponse{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[ProductHandler-1] GetProductByIdAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[ProductHandler] GetProductByIdAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[ProductHandler-2] GetProductByIdAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ID_REQUIRED))
+		c.Logger().Errorf("[ProductHandler] GetProductByIdAdmin: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-3] GetProductByIdAdmin: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ID_INVALID))
+		c.Logger().Errorf("[ProductHandler] GetProductByIdAdmin: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	result, err := p.service.GetProductById(ctx, id)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-4] GetProductByIdAdmin: %v", err)
+		c.Logger().Errorf("[ProductHandler] GetProductByIdAdmin: %v", err)
 		switch err.Error() {
-		case utils.DATA_NOT_FOUND:
+		case utils.ErrDataNotFound.Error():
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
-		case utils.RELATION_DATA_NOT_FOUND:
+		case utils.ErrRelationDataNotFound.Error():
 			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 		}
 	}
 
@@ -606,29 +606,29 @@ func (p *productHandler) GetBatchProducts(c echo.Context) error {
 		req       = request.ProductBatchRequest{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[ProductHandler-1] GetBatchProducts: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[ProductHandler] GetBatchProducts: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := c.Bind(&req); err != nil {
-		c.Logger().Errorf("[ProductHandler-2] GetBatchProducts: %v", err)
+		c.Logger().Errorf("[ProductHandler] GetBatchProducts: %v", err)
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[ProductHandler-3] GetBatchProducts: %v", err)
+		c.Logger().Errorf("[ProductHandler] GetBatchProducts: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	results, err := p.service.GetBatchProducts(ctx, req.IDProducts)
 	if err != nil {
 		switch err.Error() {
-		case utils.DATA_NOT_FOUND:
+		case utils.ErrDataNotFound.Error():
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
 		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 		}
 	}
 
@@ -654,10 +654,10 @@ func (p *productHandler) GetAllProductsAdmin(c echo.Context) error {
 		respProducts = []response.ProductListResponse{}
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[ProductHandler-1] GetAllProductsAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.TOKEN_INVALID))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[ProductHandler] GetAllProductsAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	search := c.QueryParam("search")
@@ -674,31 +674,31 @@ func (p *productHandler) GetAllProductsAdmin(c echo.Context) error {
 
 	categoryId, err := conv.ParseInt64QueryParam(c, "category", 0)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-2] GetAllProductsAdmin: %v", err)
+		c.Logger().Errorf("[ProductHandler] GetAllProductsAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	page, err := conv.ParseInt64QueryParam(c, "page", 1)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-3] GetAllProductsAdmin: %v", err)
+		c.Logger().Errorf("[ProductHandler] GetAllProductsAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
-	limit, err := conv.ParseInt64QueryParam(c, "limit", 10)
+	limit, err := conv.ParseInt64QueryParam(c, "limit", 5)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-4] GetAllProductsAdmin: %v", err)
+		c.Logger().Errorf("[ProductHandler] GetAllProductsAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	startPrice, err := conv.ParseInt64QueryParam(c, "start_price", 0)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-5] GetAllProductsAdmin: %v", err)
+		c.Logger().Errorf("[ProductHandler] GetAllProductsAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
 	endPrice, err := conv.ParseInt64QueryParam(c, "end_price", 0)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-6] GetAllProductsAdmin: %v", err)
+		c.Logger().Errorf("[ProductHandler] GetAllProductsAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -716,12 +716,12 @@ func (p *productHandler) GetAllProductsAdmin(c echo.Context) error {
 
 	results, countData, totalPages, err := p.service.GetAllProducts(ctx, reqEntity)
 	if err != nil {
-		c.Logger().Errorf("[ProductHandler-7] GetAllProductsAdmin: %v", err)
+		c.Logger().Errorf("[ProductHandler] GetAllProductsAdmin: %v", err)
 		switch err.Error() {
-		case utils.RELATION_DATA_NOT_FOUND:
+		case utils.ErrRelationDataNotFound.Error():
 			return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 		default:
-			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+			return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 		}
 	}
 

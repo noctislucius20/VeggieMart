@@ -87,20 +87,20 @@ func (e *elasticRepository) SearchProductElastic(ctx context.Context, query enti
 		e.esClient.Search.WithPretty(),
 	)
 	if err != nil {
-		e.logger.Errorf("[ElasticRepository-1] SearchProductElastic: %v", err)
+		e.logger.Errorf("[ElasticRepository] SearchProductElastic: %v", err)
 		return nil, 0, 0, err
 	}
 	defer res.Body.Close()
 
 	if res.IsError() {
 		err := errors.New(strconv.Itoa(res.StatusCode))
-		e.logger.Errorf("[ElasticRepository-2] SearchProductElastic: %v", err)
+		e.logger.Errorf("[ElasticRepository] SearchProductElastic: %v", err)
 		return nil, 0, 0, err
 	}
 
 	var result map[string]any
 	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
-		e.logger.Errorf("[ElasticRepository-3] SearchProductElastic: %v", err)
+		e.logger.Errorf("[ElasticRepository] SearchProductElastic: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -110,8 +110,8 @@ func (e *elasticRepository) SearchProductElastic(ctx context.Context, query enti
 	}
 
 	if totalData <= 0 {
-		err := errors.New(utils.DATA_NOT_FOUND)
-		e.logger.Errorf("[ElasticRepository-4] SearchProductElastic: %v", err)
+		err := utils.ErrDataNotFound
+		e.logger.Errorf("[ElasticRepository] SearchProductElastic: %v", err)
 		return nil, 0, 0, err
 	}
 

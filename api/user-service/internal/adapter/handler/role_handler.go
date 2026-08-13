@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -52,11 +53,12 @@ func NewRoleHandler(e *echo.Echo, roleService service.RoleServiceInterface, cfg 
 	userGroup := e.Group("/users")
 	userGroup.Use(middlewareGateway.GatewayValidationMiddleware(cfg))
 
-	userGroup.GET("/roles", roleHandler.GetRolesAllAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	userGroup.GET("/roles/:id", roleHandler.GetRoleByIdAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	userGroup.POST("/roles", roleHandler.CreateRoleAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	userGroup.PUT("/roles/:id", roleHandler.UpdateRoleAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
-	userGroup.DELETE("/roles/:id", roleHandler.DeleteRoleAdmin, mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	adminRoleGroup := userGroup.Group("/roles", mid.CheckToken(), mid.RequiredPermission(adminPermission...))
+	adminRoleGroup.GET("", roleHandler.GetRolesAllAdmin)
+	adminRoleGroup.GET("/:id", roleHandler.GetRoleByIdAdmin)
+	adminRoleGroup.POST("", roleHandler.CreateRoleAdmin)
+	adminRoleGroup.PUT("/:id", roleHandler.UpdateRoleAdmin)
+	adminRoleGroup.DELETE("/:id", roleHandler.DeleteRoleAdmin)
 
 	return roleHandler
 }
@@ -68,19 +70,19 @@ func (r *roleHandler) CreateRoleAdmin(c echo.Context) error {
 		ctx = c.Request().Context()
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[RoleHandler-1] CreateRoleAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[RoleHandler] CreateRoleAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	if err := c.Bind(&req); err != nil {
-		c.Logger().Errorf("[RoleHandler-2] CreateRoleAdmin: %v", err)
+		c.Logger().Errorf("[RoleHandler] CreateRoleAdmin: %v", err)
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[RoleHandler-3] CreateRoleAdmin: %v", err)
+		c.Logger().Errorf("[RoleHandler] CreateRoleAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -90,11 +92,11 @@ func (r *roleHandler) CreateRoleAdmin(c echo.Context) error {
 
 	roleId, err := r.roleService.CreateRoleAdmin(ctx, roleEntity)
 	if err != nil {
-		c.Logger().Errorf("[RoleHandler-4] CreateRoleAdmin: %v", err)
-		if err.Error() == utils.DATA_ALREADY_EXISTS {
+		c.Logger().Errorf("[RoleHandler] CreateRoleAdmin: %v", err)
+		if errors.Is(err, utils.ErrDataAlreadyExists) {
 			return c.JSON(http.StatusConflict, response.ResponseFailed(err.Error()))
 		}
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	respRoleId := map[string]int64{
@@ -110,37 +112,37 @@ func (r *roleHandler) DeleteRoleAdmin(c echo.Context) error {
 		ctx = c.Request().Context()
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[RoleHandler-1] DeleteRoleAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[RoleHandler] DeleteRoleAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[RoleHandler-2] DeleteRoleAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id required"))
+		c.Logger().Errorf("[RoleHandler] DeleteRoleAdmin: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	roleId, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[RoleHandler-3] DeleteRoleAdmin: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id invalid"))
+		c.Logger().Errorf("[RoleHandler] DeleteRoleAdmin: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	err = r.roleService.DeleteRoleAdmin(ctx, roleId)
 	if err != nil {
-		c.Logger().Errorf("[RoleHandler-4] DeleteRoleAdmin: %v", err)
-		if err.Error() == utils.DATA_NOT_FOUND {
+		c.Logger().Errorf("[RoleHandler] DeleteRoleAdmin: %v", err)
+		if errors.Is(err, utils.ErrDataNotFound) {
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
 		}
-		if err.Error() == utils.DATA_STILL_IN_USED {
+		if errors.Is(err, utils.ErrDataStillInUsed) {
 			return c.JSON(http.StatusConflict, response.ResponseFailed(err.Error()))
 		}
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
-	return c.JSON(http.StatusOK, response.ResponseSuccess(nil))
+	return c.JSON(http.StatusNoContent, response.ResponseSuccess(nil))
 }
 
 // GetRolesAllAdmin implements RoleHandlerInterface.
@@ -150,18 +152,18 @@ func (r *roleHandler) GetRolesAllAdmin(c echo.Context) error {
 		ctx      = c.Request().Context()
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[RoleHandler-1] GetRolesAllAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[RoleHandler] GetRolesAllAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	search := c.QueryParam("search")
 
 	roles, err := r.roleService.GetRolesAllAdmin(ctx, search)
 	if err != nil {
-		c.Logger().Errorf("[RoleHandler-2] GetRolesAllAdmin: %v", err)
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		c.Logger().Errorf("[RoleHandler] GetRolesAllAdmin: %v", err)
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	for _, role := range roles {
@@ -181,31 +183,31 @@ func (r *roleHandler) GetRoleByIdAdmin(c echo.Context) error {
 		ctx      = c.Request().Context()
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[RoleHandler-1] GetRoleByIdAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[RoleHandler] GetRoleByIdAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[RoleHandler-2] GetRoleByIdAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id required"))
+		c.Logger().Errorf("[RoleHandler] GetRoleByIdAdmin: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[RoleHandler-3] GetRoleByIdAdmin: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id invalid"))
+		c.Logger().Errorf("[RoleHandler] GetRoleByIdAdmin: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	role, err := r.roleService.GetRoleByIdAdmin(ctx, id)
 	if err != nil {
-		c.Logger().Errorf("[RoleHandler-4] GetRoleByIdAdmin: %v", err)
-		if err.Error() == utils.DATA_NOT_FOUND {
+		c.Logger().Errorf("[RoleHandler] GetRoleByIdAdmin: %v", err)
+		if errors.Is(err, utils.ErrDataNotFound) {
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
 		}
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	respRole = response.RoleResponse{
@@ -223,31 +225,31 @@ func (r *roleHandler) UpdateRoleAdmin(c echo.Context) error {
 		ctx = c.Request().Context()
 	)
 
-	user := c.Get("user").(string)
-	if user == "" {
-		c.Logger().Errorf("[RoleHandler-1] UpdateRoleAdmin: %v", "data token not found")
-		return c.JSON(http.StatusUnauthorized, response.ResponseFailed("data token invalid"))
+	user, ok := c.Get("user").(string)
+	if !ok || user == "" {
+		c.Logger().Errorf("[RoleHandler] UpdateRoleAdmin: %v", utils.ErrTokenInvalid.Error())
+		return c.JSON(http.StatusUnauthorized, response.ResponseFailed(utils.ErrTokenInvalid.Error()))
 	}
 
 	idParam := c.Param("id")
 	if idParam == "" {
-		c.Logger().Errorf("[RoleHandler-2] UpdateRoleAdmin: %v", "id required")
-		return c.JSON(http.StatusBadRequest, response.ResponseFailed("id required"))
+		c.Logger().Errorf("[RoleHandler] UpdateRoleAdmin: %v", utils.ErrIDRequired.Error())
+		return c.JSON(http.StatusBadRequest, response.ResponseFailed(utils.ErrIDRequired.Error()))
 	}
 
 	id, err := strconv.ParseInt(idParam, 10, 64)
 	if err != nil {
-		c.Logger().Errorf("[RoleHandler-3] UpdateRoleAdmin: %v", "id invalid")
-		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed("id invalid"))
+		c.Logger().Errorf("[RoleHandler] UpdateRoleAdmin: %v", utils.ErrIDInvalid.Error())
+		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(utils.ErrIDInvalid.Error()))
 	}
 
 	if err := c.Bind(&req); err != nil {
-		c.Logger().Errorf("[RoleHandler-4] UpdateRoleAdmin: %v", err)
+		c.Logger().Errorf("[RoleHandler] UpdateRoleAdmin: %v", err)
 		return c.JSON(http.StatusBadRequest, response.ResponseFailed(err.Error()))
 	}
 
 	if err := c.Validate(&req); err != nil {
-		c.Logger().Errorf("[RoleHandler-5] UpdateRoleAdmin: %v", err)
+		c.Logger().Errorf("[RoleHandler] UpdateRoleAdmin: %v", err)
 		return c.JSON(http.StatusUnprocessableEntity, response.ResponseFailed(err.Error()))
 	}
 
@@ -258,14 +260,14 @@ func (r *roleHandler) UpdateRoleAdmin(c echo.Context) error {
 
 	err = r.roleService.UpdateRoleAdmin(ctx, reqEntity)
 	if err != nil {
-		c.Logger().Errorf("[RoleHandler-6] UpdateRoleAdmin: %v", err)
-		if err.Error() == utils.DATA_NOT_FOUND {
+		c.Logger().Errorf("[RoleHandler] UpdateRoleAdmin: %v", err)
+		if errors.Is(err, utils.ErrDataNotFound) {
 			return c.JSON(http.StatusNotFound, response.ResponseFailed(err.Error()))
 		}
-		if err.Error() == utils.DATA_ALREADY_EXISTS {
+		if errors.Is(err, utils.ErrDataAlreadyExists) {
 			return c.JSON(http.StatusConflict, response.ResponseFailed(err.Error()))
 		}
-		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.INTERNAL_SERVER_ERROR))
+		return c.JSON(http.StatusInternalServerError, response.ResponseFailed(utils.ErrInternalServerError.Error()))
 	}
 
 	return c.JSON(http.StatusOK, response.ResponseSuccess(nil))

@@ -20,7 +20,7 @@ func (v *Validator) Validate(i any) error {
 	if err != nil {
 		object, _ := err.(validator.ValidationErrors)
 		for _, e := range object {
-			log.Errorf("[Validate-1] %s: %s", e.Field(), e.Translate(v.Translator))
+			log.Errorf("[Validate] %s: %s", e.Field(), e.Translate(v.Translator))
 
 			return errors.New(e.Translate(v.Translator))
 
@@ -35,7 +35,7 @@ func NewValidator() *Validator {
 	uni := ut.New(en, en)
 	trans, found := uni.GetTranslator("en")
 	if !found {
-		log.Fatalf("[NewValidator-1] Translator not found")
+		log.Fatalf("[NewValidator] Translator not found")
 	}
 
 	validate := validator.New()

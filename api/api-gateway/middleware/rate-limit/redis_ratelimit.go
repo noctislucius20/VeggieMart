@@ -53,7 +53,7 @@ func (rl *middlewareRateLimit) MiddlewareRateLimiter() echo.MiddlewareFunc {
 			}
 
 			if !allowed {
-				return c.JSON(http.StatusTooManyRequests, response.ResponseFailed(utils.TOO_MANY_REQUESTS))
+				return c.JSON(http.StatusTooManyRequests, response.ResponseFailed(utils.ErrTooManyRequests.Error()))
 			}
 
 			return next(c)

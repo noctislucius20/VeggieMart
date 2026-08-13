@@ -7,6 +7,7 @@ import (
 	"syscall"
 	"time"
 	"user-service/config"
+	"user-service/database/seeds"
 	"user-service/internal/adapter/handler"
 	"user-service/internal/adapter/repository"
 	"user-service/internal/adapter/repository/cache"
@@ -29,15 +30,17 @@ func RunServer() {
 	cfg := config.NewConfig()
 	db, err := cfg.ConnectionPostgres(serviceCtx)
 	if err != nil {
-		customLogger.Logger().Fatalf("[RunServer-1] %v", err)
+		customLogger.Logger().Fatalf("[RunServer] %v", err)
 		return
 	}
 
 	redisClient, err := cfg.NewRedisClient(serviceCtx)
 	if err != nil {
-		customLogger.Logger().Fatalf("[RunServer-2] %v", err)
+		customLogger.Logger().Fatalf("[RunServer] %v", err)
 		return
 	}
+
+	seeds.RedisPermissionSeed(serviceCtx, redisClient, db.DB)
 
 	e := echo.New()
 
@@ -84,7 +87,7 @@ func RunServer() {
 
 		err = e.Start(":" + cfg.App.AppPort)
 		if err != nil {
-			customLogger.Logger().Fatalf("[RunServer-3] %v", err)
+			customLogger.Logger().Fatalf("[RunServer] %v", err)
 			return
 		}
 	}()
@@ -96,7 +99,7 @@ func RunServer() {
 
 	serviceCancel()
 
-	customLogger.Logger().Infof("[RunServer-4] shutting down server on 5 seconds...")
+	customLogger.Logger().Infof("[RunServer] shutting down server on 5 seconds...")
 
 	ctx, cancel := context.WithTimeout(
 		context.Background(),

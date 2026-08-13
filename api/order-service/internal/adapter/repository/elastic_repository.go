@@ -56,7 +56,7 @@ func (e *elasticRepository) SearchOrderElastic(ctx context.Context, queryString 
 			}
 		},
 		"sort": [
-			{ "id": "asc" }
+			{ "id": "desc" }
 		]
 	}`, offset, queryString.Limit, statusFilter, buyerIdFilter, searchFilter)
 
@@ -68,7 +68,7 @@ func (e *elasticRepository) SearchOrderElastic(ctx context.Context, queryString 
 	)
 
 	if err != nil {
-		e.logger.Errorf("[ElasticRepository-1] SearchOrderElastic: %v", err)
+		e.logger.Errorf("[ElasticRepository] SearchOrderElastic: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -76,13 +76,13 @@ func (e *elasticRepository) SearchOrderElastic(ctx context.Context, queryString 
 
 	if res.IsError() {
 		err := errors.New(strconv.Itoa(res.StatusCode))
-		e.logger.Errorf("[ElasticRepository-2] SearchOrderElastic: %v", err)
+		e.logger.Errorf("[ElasticRepository] SearchOrderElastic: %v", err)
 		return nil, 0, 0, err
 	}
 
 	var result map[string]any
 	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
-		e.logger.Errorf("[ElasticRepository-3] SearchOrderElastic: %v", err)
+		e.logger.Errorf("[ElasticRepository] SearchOrderElastic: %v", err)
 		return nil, 0, 0, err
 	}
 
@@ -92,8 +92,8 @@ func (e *elasticRepository) SearchOrderElastic(ctx context.Context, queryString 
 	}
 
 	if totalData <= 0 {
-		err := errors.New(utils.DATA_NOT_FOUND)
-		e.logger.Errorf("[ElasticRepository-4] SearchOrderElastic: %v", err)
+		err := utils.ErrDataNotFound
+		e.logger.Errorf("[ElasticRepository] SearchOrderElastic: %v", err)
 		return nil, 0, 0, err
 	}
 

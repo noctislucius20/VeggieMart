@@ -5,10 +5,10 @@ type PaymentEntity struct {
 	UserID           int64              `json:"user_id"`
 	PaymentMethod    string             `json:"payment_method"`
 	PaymentStatus    string             `json:"payment_status"`
-	PaymentGatewayID string             `json:"payment_gateway_id"`
+	PaymentGatewayID *string            `json:"payment_gateway_id"`
 	PaymentAt        string             `json:"payment_at"`
 	GrossAmount      float64            `json:"gross_amount"`
-	PaymentURL       string             `json:"payment_url"`
+	PaymentURL       *string            `json:"payment_url"`
 	Remarks          string             `json:"remarks"`
 	Order            OrderEntity        `json:"order"`
 	Customer         CustomerEntity     `json:"customer"`

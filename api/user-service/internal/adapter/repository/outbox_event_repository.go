@@ -52,7 +52,7 @@ func (o *outboxEventRepository) UpdateFailedEvent(ctx context.Context, outboxIds
 	)
 
 	if err := db.WithContext(ctx).Where("id IN ?", outboxIds).Find(&outboxModels).Error; err != nil {
-		o.logger.Errorf("[OutboxEventRepository-1] UpdateFailedEvent: %v", err)
+		o.logger.Errorf("[OutboxEventRepository] UpdateFailedEvent: %v", err)
 		return err
 	}
 
@@ -77,7 +77,7 @@ func (o *outboxEventRepository) UpdateFailedEvent(ctx context.Context, outboxIds
 	}
 
 	if err := db.WithContext(ctx).Save(&updatedOutbox).Error; err != nil {
-		o.logger.Errorf("[OutboxEventRepository-2] UpdateFailedEvent: %v", err)
+		o.logger.Errorf("[OutboxEventRepository] UpdateFailedEvent: %v", err)
 		return err
 	}
 
@@ -92,7 +92,7 @@ func (o *outboxEventRepository) UpdatePublishedEvent(ctx context.Context, outbox
 	)
 
 	if err := db.WithContext(ctx).Where("id IN ?", outboxIds).Find(&outboxModels).Error; err != nil {
-		o.logger.Errorf("[OutboxEventRepository-1] UpdatePublishedEvent: %v", err)
+		o.logger.Errorf("[OutboxEventRepository] UpdatePublishedEvent: %v", err)
 		return err
 	}
 
@@ -105,7 +105,7 @@ func (o *outboxEventRepository) UpdatePublishedEvent(ctx context.Context, outbox
 	}
 
 	if err := db.WithContext(ctx).Save(&updatedOutbox).Error; err != nil {
-		o.logger.Errorf("[OutboxEventRepository-2] UpdatePublishedEvent: %v", err)
+		o.logger.Errorf("[OutboxEventRepository] UpdatePublishedEvent: %v", err)
 		return err
 	}
 
@@ -124,7 +124,7 @@ func (o *outboxEventRepository) GetAllPendingEvent(ctx context.Context) ([]entit
 		Where("status = ? AND next_retry_at <= ?", "PENDING", time.Now()).
 		Limit(10).
 		Find(&outboxModels).Error; err != nil {
-		o.logger.Errorf("[OutboxEventRepository-1] GetAllPendingEvent: %v", err)
+		o.logger.Errorf("[OutboxEventRepository] GetAllPendingEvent: %v", err)
 		return nil, err
 	}
 
@@ -151,7 +151,7 @@ func (o *outboxEventRepository) GetAllPendingEvent(ctx context.Context) ([]entit
 	}
 
 	if err := db.WithContext(ctx).Save(&updatedOutbox).Error; err != nil {
-		o.logger.Errorf("[OutboxEventRepository-2] GetAllPendingEvent: %v", err)
+		o.logger.Errorf("[OutboxEventRepository] GetAllPendingEvent: %v", err)
 		return nil, err
 	}
 
@@ -183,7 +183,7 @@ func (o *outboxEventRepository) CreateEvent(ctx context.Context, publishName str
 	}
 
 	if err := db.WithContext(ctx).Create(&outboxModel).Error; err != nil {
-		o.logger.Errorf("[OutboxEventRepository-1] CreateEvent: %v", err)
+		o.logger.Errorf("[OutboxEventRepository] CreateEvent: %v", err)
 		return err
 	}
 

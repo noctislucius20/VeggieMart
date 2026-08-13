@@ -54,7 +54,7 @@ func (r *roleService) GetRoleByNameAdmin(ctx context.Context, name string) (*ent
 
 		return nil
 	}); err != nil {
-		r.logger.Errorf("[RoleService-1] GetRoleByNameAdmin: %v", err)
+		r.logger.Errorf("[RoleService] GetRoleByNameAdmin: %v", err)
 		return nil, err
 	}
 
@@ -79,7 +79,7 @@ func (r *roleService) CreateRoleAdmin(ctx context.Context, req entity.RoleEntity
 
 		return nil
 	}); err != nil {
-		r.logger.Errorf("[RoleService-1] CreateRoleAdmin: %v", err)
+		r.logger.Errorf("[RoleService] CreateRoleAdmin: %v", err)
 		return 0, err
 	}
 
@@ -99,7 +99,7 @@ func (r *roleService) DeleteRoleAdmin(ctx context.Context, id int64) error {
 
 		return nil
 	}); err != nil {
-		r.logger.Errorf("[RoleService-1] DeleteRoleAdmin: %v", err)
+		r.logger.Errorf("[RoleService] DeleteRoleAdmin: %v", err)
 		return err
 	}
 
@@ -120,7 +120,7 @@ func (r *roleService) GetRolesAllAdmin(ctx context.Context, search string) ([]en
 
 		return nil
 	}); err != nil {
-		r.logger.Errorf("[RoleService-1] GetRolesAllAdmin: %v", err)
+		r.logger.Errorf("[RoleService] GetRolesAllAdmin: %v", err)
 		return nil, err
 	}
 
@@ -143,7 +143,7 @@ func (r *roleService) GetRoleByIdAdmin(ctx context.Context, id int64) (*entity.R
 
 		return nil
 	}); err != nil {
-		r.logger.Errorf("[RoleService-1] GetRoleByIdAdmin: %v", err)
+		r.logger.Errorf("[RoleService] GetRoleByIdAdmin: %v", err)
 		return nil, err
 	}
 
@@ -163,7 +163,7 @@ func (r *roleService) UpdateRoleAdmin(ctx context.Context, req entity.RoleEntity
 
 		return nil
 	}); err != nil {
-		r.logger.Errorf("[RoleService-1] UpdateRoleAdmin: %v", err)
+		r.logger.Errorf("[RoleService] UpdateRoleAdmin: %v", err)
 		return err
 	}
 
