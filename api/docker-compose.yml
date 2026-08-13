@@ -22,7 +22,7 @@ services:
       start_period: 5s
 
   user-service:
-    build: 
+    build:
       context: ./user-service
       dockerfile: Dockerfile
     env_file:
@@ -46,9 +46,9 @@ services:
       - rabbitmq-net
       - elasticsearch-net
       - api-gateway-net
-  
+
   user-publisher-worker:
-    build: 
+    build:
       context: ./user-service
       dockerfile: Dockerfile
     env_file:
@@ -93,7 +93,7 @@ services:
       start_period: 5s
 
   product-service:
-    build: 
+    build:
       context: ./product-service
       dockerfile: Dockerfile
     env_file:
@@ -118,7 +118,7 @@ services:
       - api-gateway-net
 
   product-publisher-worker:
-    build: 
+    build:
       context: ./product-service
       dockerfile: Dockerfile
     env_file:
@@ -141,7 +141,7 @@ services:
       - elasticsearch-net
 
   product-consumer-worker:
-    build: 
+    build:
       context: ./product-service
       dockerfile: Dockerfile
     env_file:
@@ -184,9 +184,9 @@ services:
       timeout: 5s
       retries: 10
       start_period: 5s
-  
+
   order-service:
-    build: 
+    build:
       context: ./order-service
       dockerfile: Dockerfile
     env_file:
@@ -215,7 +215,7 @@ services:
       - api-gateway-net
 
   order-publisher-worker:
-    build: 
+    build:
       context: ./order-service
       dockerfile: Dockerfile
     env_file:
@@ -242,7 +242,7 @@ services:
       - elasticsearch-net
 
   order-consumer-worker:
-    build: 
+    build:
       context: ./order-service
       dockerfile: Dockerfile
     env_file:
@@ -291,7 +291,7 @@ services:
       start_period: 5s
 
   payment-service:
-    build: 
+    build:
       context: ./payment-service
       dockerfile: Dockerfile
     env_file:
@@ -320,9 +320,9 @@ services:
       - rabbitmq-net
       - elasticsearch-net
       - api-gateway-net
-  
+
   payment-publisher-worker:
-    build: 
+    build:
       context: ./payment-service
       dockerfile: Dockerfile
     env_file:
@@ -351,7 +351,7 @@ services:
       - elasticsearch-net
 
   payment-consumer-worker:
-    build: 
+    build:
       context: ./payment-service
       dockerfile: Dockerfile
     env_file:
@@ -402,7 +402,7 @@ services:
       start_period: 5s
 
   notification-service:
-    build: 
+    build:
       context: ./notification-service
       dockerfile: Dockerfile
     env_file:
@@ -425,9 +425,9 @@ services:
       - rabbitmq-net
       - elasticsearch-net
       - api-gateway-net
-  
+
   notification-consumer-worker:
-    build: 
+    build:
       context: ./notification-service
       dockerfile: Dockerfile
     env_file:
@@ -450,7 +450,7 @@ services:
       - elasticsearch-net
 
   api-gateway-service:
-    build: 
+    build:
       context: ./api-gateway
       dockerfile: Dockerfile
     env_file:
@@ -479,9 +479,9 @@ services:
     image: redis:8.4
     restart: unless-stopped
     ports:
-    - "127.0.0.1:6379:6379"
+      - "127.0.0.1:6379:6379"
     networks:
-    - redis-net
+      - redis-net
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping"]
       interval: 10s
@@ -503,10 +503,10 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
       interval: 10s
-      timeout: 5s
+      timeout: 15s
       retries: 10
-      start_period: 10s
-  
+      start_period: 40s
+
   elasticsearch:
     image: elasticsearch:7.17.10
     environment:
@@ -519,7 +519,11 @@ services:
     networks:
       - elasticsearch-net
     healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -vq '\"status\":\"red\"'"]
+      test:
+        [
+          "CMD-SHELL",
+          'curl -s http://localhost:9200/_cluster/health | grep -vq ''"status":"red"''',
+        ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -542,4 +546,3 @@ networks:
   rabbitmq-net:
   elasticsearch-net:
   api-gateway-net:
-
