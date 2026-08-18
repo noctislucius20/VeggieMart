@@ -1,5 +1,6 @@
 services:
   user-db:
+    container_name: user-db
     image: postgres:18
     environment:
       POSTGRES_USER: ${DB_USER}
@@ -22,6 +23,7 @@ services:
       start_period: 5s
 
   user-service:
+    container_name: user-service
     build:
       context: ./api/user-service
       dockerfile: Dockerfile
@@ -47,6 +49,7 @@ services:
       - api-gateway-net
 
   user-publisher-worker:
+    container_name: user-publisher-worker
     build:
       context: ./api/user-service
       dockerfile: Dockerfile
@@ -70,6 +73,7 @@ services:
       - elasticsearch-net
 
   product-db:
+    container_name: product-db
     image: postgres:18
     environment:
       POSTGRES_USER: ${DB_USER}
@@ -92,6 +96,7 @@ services:
       start_period: 5s
 
   product-service:
+    container_name: product-service
     build:
       context: ./api/product-service
       dockerfile: Dockerfile
@@ -117,6 +122,7 @@ services:
       - api-gateway-net
 
   product-publisher-worker:
+    container_name: product-publisher-worker
     build:
       context: ./api/product-service
       dockerfile: Dockerfile
@@ -140,6 +146,7 @@ services:
       - elasticsearch-net
 
   product-consumer-worker:
+    container_name: product-consumer-worker
     build:
       context: ./api/product-service
       dockerfile: Dockerfile
@@ -163,6 +170,7 @@ services:
       - elasticsearch-net
 
   order-db:
+    container_name: order-db
     image: postgres:18
     environment:
       POSTGRES_USER: ${DB_USER}
@@ -185,6 +193,7 @@ services:
       start_period: 5s
 
   order-service:
+    container_name: order-service
     build:
       context: ./api/order-service
       dockerfile: Dockerfile
@@ -214,6 +223,7 @@ services:
       - api-gateway-net
 
   order-publisher-worker:
+    container_name: order-publisher-worker
     build:
       context: ./api/order-service
       dockerfile: Dockerfile
@@ -241,6 +251,7 @@ services:
       - elasticsearch-net
 
   order-consumer-worker:
+    container_name: order-consumer-worker
     build:
       context: ./api/order-service
       dockerfile: Dockerfile
@@ -268,6 +279,7 @@ services:
       - elasticsearch-net
 
   payment-db:
+    container_name: payment-db
     image: postgres:18
     environment:
       POSTGRES_USER: ${DB_USER}
@@ -290,6 +302,7 @@ services:
       start_period: 5s
 
   payment-service:
+    container_name: payment-service
     build:
       context: ./api/payment-service
       dockerfile: Dockerfile
@@ -321,6 +334,7 @@ services:
       - api-gateway-net
 
   payment-publisher-worker:
+    container_name: payment-publisher-worker
     build:
       context: ./api/payment-service
       dockerfile: Dockerfile
@@ -350,6 +364,7 @@ services:
       - elasticsearch-net
 
   payment-consumer-worker:
+    container_name: payment-consumer-worker
     build:
       context: ./api/payment-service
       dockerfile: Dockerfile
@@ -379,6 +394,7 @@ services:
       - elasticsearch-net
 
   notification-db:
+    container_name: notification-db
     image: postgres:18
     environment:
       POSTGRES_USER: ${DB_USER}
@@ -401,6 +417,7 @@ services:
       start_period: 5s
 
   notification-service:
+    container_name: notification-service
     build:
       context: ./api/notification-service
       dockerfile: Dockerfile
@@ -426,6 +443,7 @@ services:
       - api-gateway-net
 
   notification-consumer-worker:
+    container_name: notification-consumer-worker
     build:
       context: ./api/notification-service
       dockerfile: Dockerfile
@@ -449,6 +467,7 @@ services:
       - elasticsearch-net
 
   api-gateway-service:
+    container_name: api-gateway-service
     build:
       context: ./api/api-gateway
       dockerfile: Dockerfile
@@ -475,6 +494,7 @@ services:
       - api-gateway-net
 
   ui:
+    container_name: ui
     build:
       context: ./ui
       dockerfile: Dockerfile
@@ -490,6 +510,7 @@ services:
       - api-gateway-net
 
   redis:
+    container_name: redis
     image: redis:8.4
     restart: unless-stopped
     ports:
@@ -504,6 +525,7 @@ services:
       start_period: 10s
 
   rabbitmq:
+    container_name: rabbitmq
     image: rabbitmq:3-management-alpine
     ports:
       - "127.0.0.1:5672:5672"
@@ -522,6 +544,7 @@ services:
       start_period: 40s
 
   elasticsearch:
+    container_name: elasticsearch
     image: elasticsearch:7.17.10
     environment:
       - discovery.type=single-node
