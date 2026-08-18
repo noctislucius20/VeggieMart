@@ -1,0 +1,29 @@
+<svg width="536" height="333" viewBox="0 0 536 333" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g clip-path="url(#clip0_2812_6697)">
+    <!-- Background -->
+    <rect width="536" height="333" fill="none" />
+    <rect width="536" height="333" fill="url(#paint0_linear_2812_6697)" fill-opacity="0.8" />
+
+    <!-- Text "200" -->
+    <text x="50%" y="50%" font-family="Arial" font-size="120" font-weight="bold" fill="#0AAD0A" text-anchor="middle" dominant-baseline="middle">
+      200
+    </text>
+
+    <!-- Decorative Elements -->
+    <circle cx="100" cy="100" r="50" fill="#EBEBEB" />
+    <circle cx="436" cy="233" r="30" fill="#EBEBEB" />
+    <path d="M343.094 322.855c3.79-2.129 8.656-2.208 12.517-.206 3.861 2.002 6.599 6.022 7.042 10.351-7.991.008-15.864-1.86-19.559-10.145z" fill="#EBEBEB" />
+    <path d="M164.861 291.93c-1.923 5.136-1.1 11.213 2.136 15.644 3.236 4.432 8.767 7.075 14.242 6.798-1.511-9.963-5.349-19.419-16.378-22.442z" fill="#EBEBEB" />
+  </g>
+
+  <!-- Gradients -->
+  <defs>
+    <linearGradient id="paint0_linear_2812_6697" x1="0" y1="0" x2="536" y2="333" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff" stop-opacity="0.8" />
+      <stop offset="1" stop-color="#fff" stop-opacity="0" />
+    </linearGradient>
+    <clipPath id="clip0_2812_6697">
+      <rect width="536" height="333" fill="white" />
+    </clipPath>
+  </defs>
+</svg>

@@ -38,3 +38,30 @@ dist/
 
 # Log files
 *.log
+
+# other
+otherfiles/
+
+# ===== UI (Nuxt) =====
+
+# Nuxt dev/build outputs
+ui/.output
+ui/.data
+ui/.nuxt
+ui/.nitro
+ui/.cache
+ui/dist
+
+# Node dependencies
+ui/node_modules
+
+# Logs
+ui/logs
+
+# Misc
+ui/.fleet
+
+# Local env files
+ui/.env
+ui/.env.*
+!ui/.env.example

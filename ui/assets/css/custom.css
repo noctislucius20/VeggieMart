@@ -1,0 +1,184 @@
+.z-2000 {
+  z-index: 2000;
+}
+
+.inset-y-0 {
+  top: 0;
+  bottom: 0;
+}
+
+.left-0 {
+  left: 0;
+}
+
+.translate-x-0 {
+  transform: translateX(0);
+}
+
+.-translate-x-full {
+  transform: translateX(-100%);
+}
+
+.transition-transform {
+  transition-property: transform;
+}
+
+.duration-300 {
+  transition-duration: 300ms;
+}
+
+.ease-in-out {
+  transition-timing-function: cubic-bezier(0.075, 0.82, 0.165, 1);
+}
+
+.block {
+  display: block;
+}
+
+.bg-black\/50 {
+  background-color: color-mix(in srgb, black 50%, transparent);
+}
+
+.fixed {
+  position: fixed;
+}
+
+.inset-0 {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+@media (min-width: 0px) {
+  .sm\:col-span-12 {
+    grid-column: span 12 / span 12;
+  }
+
+  .sm\:w-full {
+    width: 33.3333%;
+  }
+}
+
+@media (min-width: 640px) {
+  .md\:w-1\/5 {
+    width: 20%;
+  }
+}
+
+@media (min-width: 1280px) {
+  .xl\:block {
+    display: block;
+  }
+
+  .xl\:translate-x-0 {
+    transform: translateX(0);
+  }
+
+  .xl\:relative {
+    position: relative;
+  }
+
+  .xl\:hidden {
+    display: none;
+  }
+
+  .xl\:col-span-5 {
+    grid-column: span 5 / span 5;
+  }
+}
+
+.offcanvas-start {
+  top: 0;
+  left: 0;
+  width: var(--bs-offcanvas-width, 100%); /* Lebar default 400px */
+  border-right: 1px solid var(--bs-offcanvas-border-color);
+  transform: translateX(-100%); /* Di-geser ke luar layar sebelah kiri */
+}
+
+/* Mobile Menu Offcanvas */
+.w-\[85\%\] {
+  width: 85%;
+}
+
+.opacity-0 {
+  opacity: 0;
+}
+
+.opacity-100 {
+  opacity: 1;
+}
+
+.pointer-events-none {
+  pointer-events: none;
+}
+
+.z-40 {
+  z-index: 40;
+}
+
+.z-50 {
+  z-index: 50;
+}
+
+.max-w-sm {
+  max-width: 24rem;
+}
+
+.shadow-xl {
+  box-shadow:
+    0 20px 25px -5px rgba(0, 0, 0, 0.1),
+    0 8px 10px -6px rgba(0, 0, 0, 0.1);
+}
+
+.overflow-y-auto {
+  overflow-y: auto;
+}
+
+.p-2\.5 {
+  padding: 0.625rem;
+}
+
+.py-2\.5 {
+  padding-top: 0.625rem;
+  padding-bottom: 0.625rem;
+}
+
+.tracking-wide {
+  letter-spacing: 0.025em;
+}
+
+.transition-opacity {
+  transition-property: opacity;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+.focus\:ring-blue-600:focus {
+  --tw-ring-opacity: 1;
+  --tw-ring-color: rgb(37 99 235 / var(--tw-ring-opacity));
+}
+
+.focus\:border-blue-600:focus {
+  --tw-border-opacity: 1;
+  border-color: rgb(37 99 235 / var(--tw-border-opacity));
+}
+
+.hover\:text-gray-800:hover {
+  --tw-text-opacity: 1;
+  color: rgb(33 49 60 / var(--tw-text-opacity));
+}
+
+.rotate-180 {
+  transform: rotate(180deg);
+}
