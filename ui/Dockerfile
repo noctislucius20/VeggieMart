@@ -2,6 +2,8 @@ FROM oven/bun:1-alpine
 
 WORKDIR /app
 
+RUN apk add --no-cache python3 make g++
+
 COPY package*.json ./
 COPY bun.lock ./
 
