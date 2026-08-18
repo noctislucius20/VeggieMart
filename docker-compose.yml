@@ -23,10 +23,10 @@ services:
 
   user-service:
     build:
-      context: ./user-service
+      context: ./api/user-service
       dockerfile: Dockerfile
     env_file:
-      - ./user-service/.env
+      - ./api/user-service/.env
     ports:
       - "8080:8080"
     restart: unless-stopped
@@ -48,10 +48,10 @@ services:
 
   user-publisher-worker:
     build:
-      context: ./user-service
+      context: ./api/user-service
       dockerfile: Dockerfile
     env_file:
-      - ./user-service/.env
+      - ./api/user-service/.env
     command: ["./app", "publisher-worker"]
     restart: unless-stopped
     depends_on:
@@ -93,10 +93,10 @@ services:
 
   product-service:
     build:
-      context: ./product-service
+      context: ./api/product-service
       dockerfile: Dockerfile
     env_file:
-      - ./product-service/.env
+      - ./api/product-service/.env
     ports:
       - "8081:8081"
     restart: unless-stopped
@@ -118,10 +118,10 @@ services:
 
   product-publisher-worker:
     build:
-      context: ./product-service
+      context: ./api/product-service
       dockerfile: Dockerfile
     env_file:
-      - ./product-service/.env
+      - ./api/product-service/.env
     command: ["./app", "publisher-worker"]
     restart: unless-stopped
     depends_on:
@@ -141,10 +141,10 @@ services:
 
   product-consumer-worker:
     build:
-      context: ./product-service
+      context: ./api/product-service
       dockerfile: Dockerfile
     env_file:
-      - ./product-service/.env
+      - ./api/product-service/.env
     command: ["./app", "consumer-worker"]
     restart: unless-stopped
     depends_on:
@@ -186,10 +186,10 @@ services:
 
   order-service:
     build:
-      context: ./order-service
+      context: ./api/order-service
       dockerfile: Dockerfile
     env_file:
-      - ./order-service/.env
+      - ./api/order-service/.env
     ports:
       - "8082:8082"
     restart: unless-stopped
@@ -215,10 +215,10 @@ services:
 
   order-publisher-worker:
     build:
-      context: ./order-service
+      context: ./api/order-service
       dockerfile: Dockerfile
     env_file:
-      - ./order-service/.env
+      - ./api/order-service/.env
     command: ["./app", "publisher-worker"]
     restart: unless-stopped
     depends_on:
@@ -242,10 +242,10 @@ services:
 
   order-consumer-worker:
     build:
-      context: ./order-service
+      context: ./api/order-service
       dockerfile: Dockerfile
     env_file:
-      - ./order-service/.env
+      - ./api/order-service/.env
     command: ["./app", "consumer-worker"]
     restart: unless-stopped
     depends_on:
@@ -291,10 +291,10 @@ services:
 
   payment-service:
     build:
-      context: ./payment-service
+      context: ./api/payment-service
       dockerfile: Dockerfile
     env_file:
-      - ./payment-service/.env
+      - ./api/payment-service/.env
     ports:
       - "8083:8083"
     restart: unless-stopped
@@ -322,10 +322,10 @@ services:
 
   payment-publisher-worker:
     build:
-      context: ./payment-service
+      context: ./api/payment-service
       dockerfile: Dockerfile
     env_file:
-      - ./payment-service/.env
+      - ./api/payment-service/.env
     command: ["./app", "publisher-worker"]
     restart: unless-stopped
     depends_on:
@@ -351,10 +351,10 @@ services:
 
   payment-consumer-worker:
     build:
-      context: ./payment-service
+      context: ./api/payment-service
       dockerfile: Dockerfile
     env_file:
-      - ./payment-service/.env
+      - ./api/payment-service/.env
     command: ["./app", "consumer-worker"]
     restart: unless-stopped
     depends_on:
@@ -402,10 +402,10 @@ services:
 
   notification-service:
     build:
-      context: ./notification-service
+      context: ./api/notification-service
       dockerfile: Dockerfile
     env_file:
-      - ./notification-service/.env
+      - ./api/notification-service/.env
     ports:
       - "8084:8084"
     restart: unless-stopped
@@ -427,10 +427,10 @@ services:
 
   notification-consumer-worker:
     build:
-      context: ./notification-service
+      context: ./api/notification-service
       dockerfile: Dockerfile
     env_file:
-      - ./notification-service/.env
+      - ./api/notification-service/.env
     command: ["./app", "consumer-worker"]
     restart: unless-stopped
     depends_on:
@@ -450,10 +450,10 @@ services:
 
   api-gateway-service:
     build:
-      context: ./api-gateway
+      context: ./api/api-gateway
       dockerfile: Dockerfile
     env_file:
-      - ./api-gateway/.env
+      - ./api/api-gateway/.env
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -472,6 +472,21 @@ services:
         condition: service_healthy
     networks:
       - redis-net
+      - api-gateway-net
+
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    env_file:
+      - ./ui/.env
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      api-gateway-service:
+        condition: service_started
+    networks:
       - api-gateway-net
 
   redis:
