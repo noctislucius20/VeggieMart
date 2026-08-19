@@ -33,7 +33,7 @@ export default defineNuxtConfig({
       // apiPaymentBaseUrl: process.env.NUXT_PAYMENT_API_BASE_URL,
       // apiNotificationBaseUrl: process.env.NUXT_NOTIFICATION_API_BASE_URL,
 
-      apiGatewayBaseUrl: process.env.NUXT_GATEWAY_API_BASE_URL || 'http://localhost:8000/api',
+      apiGatewayBaseUrl: process.env.NUXT_GATEWAY_API_BASE_URL,
       midtransClientKey: process.env.NUXT_MIDTRANS_CLIENT_KEY
     }
   },
